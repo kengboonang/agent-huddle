@@ -2,7 +2,7 @@ import Foundation
 import HuddleCore
 
 /// Sample data, used to check the layout without touching real sessions.
-/// Run with `HUDDLE_DEMO=list|detail|permission|question|pill`.
+/// Run with `HUDDLE_DEMO=list|needs|detail|permission|question|pill`.
 enum Demo {
     static func fill(_ store: HuddleStore, mode: String) {
         let now = Date()
@@ -47,8 +47,8 @@ enum Demo {
         switch mode {
         case "detail":
             store.selected = "a"
-        case "permission":
-            store.selected = "a"
+        case "permission", "needs":
+            store.selected = mode == "needs" ? nil : "a"
             store.pending = [PendingRequest(
                 id: "p1", sessionId: "a", toolName: "Bash",
                 toolInput: ["command": "npm install --save-dev @testing-library/user-event", "description": "Install the missing test package"],

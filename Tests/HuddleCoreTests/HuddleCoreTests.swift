@@ -241,3 +241,22 @@ private func assistant(id: String, blocks: [[String: Any]], input: Int = 10, cac
         #expect(Decisions.answerText(picked: [], options: options, custom: "") == nil)
     }
 }
+
+@Suite struct BuddyTests {
+    @Test func sameSessionAlwaysGetsTheSameBuddy() {
+        let id = "4c6373d3-43ff-4919-aab6-548aabc62942"
+        #expect(BuddyTraits(seed: id) == BuddyTraits(seed: id))
+        // Fixed values: these must not change between launches or releases.
+        #expect(BuddyTraits.fnv1a("") == 0xcbf2_9ce4_8422_2325)
+        #expect(BuddyTraits.fnv1a("a") == 0xaf63_dc4c_8601_ec8c)
+    }
+
+    @Test func traitsStayInRangeAndVary() {
+        let buddies = (0..<200).map { BuddyTraits(seed: "session-\($0)") }
+        #expect(buddies.allSatisfy { (0..<BuddyTraits.colorCount).contains($0.color) })
+        #expect(buddies.allSatisfy { BuddyTraits.names.contains($0.name) && (0..<10).contains($0.phase) })
+        #expect(Set(buddies.map(\.shape)).count == BuddyTraits.Shape.allCases.count)
+        #expect(Set(buddies.map(\.color)).count == BuddyTraits.colorCount)
+        #expect(Set(buddies.map(\.name)).count > 15)
+    }
+}

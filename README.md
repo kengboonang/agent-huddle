@@ -7,11 +7,15 @@ It also installs an automatic handoff hook, described [below](#automatic-handoff
 
 ## What the widget does
 
+- **A buddy for each session.** Every session gets its own small character, always the same one for
+  that session. It bobs while the session works, hops with a "!" when the session needs you, and
+  sleeps when the session is idle.
 - **All sessions in one list.** Each row shows the session name, its folder, what it is doing now,
   how full its context window is, the output tokens so far and the cost.
 - **Usage limits.** Your 5-hour and weekly limits, with the percent used and when each one resets.
 - **Step by step.** Click a session to see its prompts, tool calls (running, done or failed) and replies.
-- **Answer from the widget.** Allow, always allow or deny a permission request (with a note that tells
+- **Answer from the list.** A session that needs you moves to the top, with Allow and Deny on its row.
+- **Answer in detail.** Allow, always allow or deny a permission request (with a note that tells
   Claude what to do instead), approve a plan, or answer a question Claude asks.
 - **Open or hide.** "Open" brings the session's window to the front. "Hide" removes a session from the
   list until it does something new.
@@ -26,6 +30,7 @@ panel by its background to move it. The menu bar icon shows or hides the widget 
 Needs macOS 14 or later, the Swift toolchain (`xcode-select --install`) and Claude Code.
 
 ```sh
+git clone https://github.com/kengboonang/agent-huddle.git ~/agent-huddle
 cd ~/agent-huddle
 ./install.sh                   # add --no-login-item to not start the widget at login
 ```
@@ -114,7 +119,7 @@ Check the layout without touching real sessions:
 
 ```sh
 swift build
-HUDDLE_DEMO=permission HUDDLE_SNAPSHOT=/tmp/huddle.png .build/debug/AgentHuddle   # list, detail, permission, question, pill
+HUDDLE_DEMO=permission HUDDLE_SNAPSHOT=/tmp/huddle.png .build/debug/AgentHuddle   # list, needs, detail, permission, question, pill
 HUDDLE_SNAPSHOT=/tmp/live.png .build/debug/AgentHuddle                            # your real sessions
 ```
 
@@ -128,3 +133,11 @@ HUDDLE_SNAPSHOT=/tmp/live.png .build/debug/AgentHuddle                          
 | `hooks/huddle_statusline.py` | The status line |
 | `hooks/handoff.py` | The handoff hook |
 | `scripts/settings.py` | Adds and removes the settings entries |
+
+## License and credit
+
+[MIT](LICENSE).
+
+The idea comes from a demo of a widget with the same name by Alex Tsoi
+([reel](https://www.instagram.com/reel/DfpiIzDHDnA/)). This is a separate implementation written
+from scratch; it shares no code with that project.

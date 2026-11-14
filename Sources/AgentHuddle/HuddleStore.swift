@@ -11,6 +11,7 @@ struct AgentSession: Identifiable {
     var status: SessionStatus?
 
     var id: String { info.sessionId }
+    var buddy: BuddyTraits { BuddyTraits(seed: info.sessionId) }
 
     var displayName: String {
         if let title, !title.isEmpty { return title }
@@ -24,7 +25,7 @@ struct AgentSession: Identifiable {
     }
 }
 
-enum Activity {
+enum Activity: Int {
     case needsYou, working, idle
 
     var label: String {
@@ -95,6 +96,14 @@ final class HuddleStore: ObservableObject {
     func activity(_ session: AgentSession) -> Activity {
         if !requests(for: session.id).isEmpty { return .needsYou }
         return session.info.rawStatus == "busy" ? .working : .idle
+    }
+
+    /// Sessions that need you come first, then the ones working, then the idle ones.
+    var ordered: [AgentSession] {
+        sessions.enumerated().sorted { a, b in
+            let (x, y) = (activity(a.element).rawValue, activity(b.element).rawValue)
+            return x == y ? a.offset < b.offset : x < y
+        }.map(\.element)
     }
 
     var needsYouCount: Int {

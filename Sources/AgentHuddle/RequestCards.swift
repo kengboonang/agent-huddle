@@ -55,11 +55,8 @@ struct PermissionBody: View {
                 Text(request.note).font(.system(size: 11)).foregroundStyle(.secondary)
             }
             if !request.summary.isEmpty {
-                ViewThatFits(in: .vertical) {
-                    summaryText
-                    ScrollView { summaryText }
-                }
-                .frame(maxHeight: request.isPlan ? 170 : 90)
+                ScrollView { summaryText }
+                    .frame(height: summaryHeight)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
             }
             TextField("Optional: tell Claude what to do instead", text: Binding(
@@ -83,6 +80,14 @@ struct PermissionBody: View {
 }
 
 extension PermissionBody {
+    /// Tall enough for the text, up to a limit; longer text scrolls.
+    var summaryHeight: CGFloat {
+        let perLine = request.isPlan ? 56 : 50
+        let lines = request.summary.split(separator: "\n", omittingEmptySubsequences: false)
+            .reduce(0) { $0 + max(1, ($1.count + perLine - 1) / perLine) }
+        return CGFloat(min(lines, request.isPlan ? 11 : 5)) * 14 + 18
+    }
+
     var summaryText: some View {
         Text(request.summary)
             .font(.system(size: 11, design: request.isPlan ? .default : .monospaced))
