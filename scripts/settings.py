@@ -28,13 +28,16 @@ def command(script):
 
 
 def hook_groups():
-    handoff = command("handoff.py")
+    """Event name → the groups Agent Huddle adds to it."""
+    def run(script, timeout):
+        return {"type": "command", "command": command(script), "timeout": timeout}
+
     return {
-        "PermissionRequest": {"matcher": "*", "hooks": [
-            {"type": "command", "command": command("huddle_hook.py"), "timeout": 600}]},
-        "Stop": {"hooks": [{"type": "command", "command": handoff, "timeout": 15}]},
-        "PreCompact": {"hooks": [{"type": "command", "command": handoff, "timeout": 60}]},
-        "SessionStart": {"hooks": [{"type": "command", "command": handoff, "timeout": 15}]},
+        "PermissionRequest": [{"matcher": "*", "hooks": [run("huddle_hook.py", 600)]}],
+        "PostToolUse": [{"matcher": "WebSearch|WebFetch", "hooks": [run("evidence.py", 15)]}],
+        "Stop": [{"hooks": [run("handoff.py", 15)]}, {"hooks": [run("evidence.py", 15)]}],
+        "PreCompact": [{"hooks": [run("handoff.py", 60)]}],
+        "SessionStart": [{"hooks": [run("handoff.py", 15)]}],
     }
 
 
@@ -73,8 +76,8 @@ def install(settings):
     notes = []
     strip(settings)
     hooks = settings.setdefault("hooks", {})
-    for event, group in hook_groups().items():
-        hooks.setdefault(event, []).append(group)
+    for event, groups in hook_groups().items():
+        hooks.setdefault(event, []).extend(groups)
     if "statusLine" in settings:
         notes.append("You already have a status line, so it was left alone. Usage limits and exact context "
                      "percentages will not show until the status line runs %s." % command("huddle_statusline.py"))

@@ -336,6 +336,104 @@ class HandoffTests(HomeCase):
         self.assertIsNone(self.start("startup", session="s2"))
 
 
+class EvidenceTests(HomeCase):
+    SEARCH = {"query": "agent huddle", "searchCount": 1, "results": [
+        {"tool_use_id": "x", "content": [{"title": "Open [Huddle]", "url": "https://example.com/huddle"},
+                                         {"title": "Docs", "url": "https://docs.example.com/hooks/"}]},
+        "I found two pages about it."]}
+    FETCH = {"bytes": 738597, "code": 200, "codeText": "OK", "url": "https://example.com/huddle",
+             "result": "The page describes a widget.\nIt lists agents."}
+
+    def setUp(self):
+        super().setUp()
+        self.transcript = os.path.join(self.home, "t.jsonl")
+        self.base = {"session_id": "s1", "cwd": "/work/app", "transcript_path": self.transcript}
+        self.folder = os.path.join(self.home, "claude-evidence", "work-app", "s1")
+
+    def tool(self, name, tool_input, response):
+        payload = dict(self.base, hook_event_name="PostToolUse", tool_name=name, tool_input=tool_input,
+                       tool_response=response, tool_use_id="t1")
+        result = run("hooks/evidence.py", payload, self.home)
+        self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
+
+    def stop(self, message, **extra):
+        payload = dict(self.base, hook_event_name="Stop", last_assistant_message=message, **extra)
+        result = run("hooks/evidence.py", payload, self.home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout) if result.stdout else None
+
+    def evidence(self):
+        with open(os.path.join(self.folder, "evidence.md")) as f:
+            return f.read()
+
+    def test_search_and_page_are_written_down_with_links(self):
+        self.tool("WebSearch", {"query": "agent huddle"}, self.SEARCH)
+        self.tool("WebFetch", {"url": "https://example.com/huddle", "prompt": "What is it?"}, self.FETCH)
+        text = self.evidence()
+        self.assertEqual(text.count("# Evidence log"), 1)
+        for expected in ("Query: `agent huddle`", "Results that came back (2):",
+                         "- [Open (Huddle)](https://example.com/huddle)", "> I found two pages about it.",
+                         "Address: [https://example.com/huddle](https://example.com/huddle)",
+                         "Answer from the site: 200 OK, 738,597 bytes", "What Claude asked about the page: What is it?",
+                         "> The page describes a widget.\n> It lists agents."):
+            self.assertIn(expected, text)
+        with open(os.path.join(self.folder, "log.jsonl")) as f:
+            records = [json.loads(line) for line in f]
+        self.assertEqual([r["tool"] for r in records], ["WebSearch", "WebFetch"])
+        self.assertEqual(records[1]["response"], self.FETCH)
+
+    def test_other_tools_are_ignored(self):
+        self.tool("Bash", {"command": "ls"}, {"stdout": "x"})
+        self.assertFalse(os.path.exists(self.folder))
+
+    def test_stop_reports_each_turn_once(self):
+        self.tool("WebSearch", {"query": "agent huddle"}, self.SEARCH)
+        self.tool("WebFetch", {"url": "https://example.com/huddle"}, self.FETCH)
+        output = self.stop("It is a widget. Source: https://example.com/huddle.")
+        self.assertIn("Evidence this turn: 1 web search, 1 page read.", output["systemMessage"])
+        self.assertIn("file://" + os.path.join(self.folder, "evidence.md"), output["systemMessage"])
+        self.assertNotIn("hookSpecificOutput", output)
+        self.assertIsNone(self.stop("Anything else?"))
+
+    def test_links_that_came_back_from_a_search_count_as_checked(self):
+        self.tool("WebSearch", {"query": "agent huddle"}, self.SEARCH)
+        output = self.stop("See [the docs](https://docs.example.com/hooks) and https://EXAMPLE.com/huddle/.")
+        self.assertNotIn("Not checked", output["systemMessage"])
+
+    def test_a_link_from_nowhere_is_reported_and_claude_is_asked_to_check(self):
+        self.tool("WebSearch", {"query": "agent huddle"}, self.SEARCH)
+        output = self.stop("Read https://made-up.example.org/paper and https://example.com/huddle")
+        self.assertIn("Not checked: 1 link in the answer appears in nothing", output["systemMessage"])
+        self.assertIn("https://made-up.example.org/paper", output["systemMessage"])
+        ask = output["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("https://made-up.example.org/paper", ask)
+        self.assertNotIn("https://example.com/huddle", ask)
+
+    def test_a_link_from_memory_is_reported_even_with_no_web_use(self):
+        output = self.stop("The docs are at https://made-up.example.org/docs.")
+        self.assertIn("Not checked", output["systemMessage"])
+        self.assertNotIn("Evidence this turn", output["systemMessage"])
+
+    def test_claude_is_asked_only_once(self):
+        output = self.stop("See https://made-up.example.org/docs", stop_hook_active=True)
+        self.assertIn("Not checked", output["systemMessage"])
+        self.assertNotIn("hookSpecificOutput", output)
+
+    def test_links_the_user_gave_or_a_tool_printed_count_as_seen(self):
+        write_lines(self.transcript, [
+            {"type": "user", "message": {"content": "look at https://user-gave.example.com/page please"}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "b1",
+                                                      "content": "origin https://github.com/me/repo.git"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "https://claude-said.example.com"}]}},
+        ])
+        self.assertIsNone(self.stop("Done: https://user-gave.example.com/page and https://github.com/me/repo.git"))
+        output = self.stop("As I said, https://claude-said.example.com")
+        self.assertIn("https://claude-said.example.com", output["systemMessage"])
+
+    def test_an_answer_without_links_is_silent(self):
+        self.assertIsNone(self.stop("All done, no links."))
+
+
 class SettingsTests(HomeCase):
     def setUp(self):
         super().setUp()
@@ -357,8 +455,10 @@ class SettingsTests(HomeCase):
             json.dump(original, f)
         self.settings("install")
         installed, _ = self.settings("install")
-        self.assertEqual(sorted(installed["hooks"]), ["PermissionRequest", "PreCompact", "SessionStart", "Stop"])
-        self.assertEqual(len(installed["hooks"]["Stop"]), 2)
+        self.assertEqual(sorted(installed["hooks"]),
+                         ["PermissionRequest", "PostToolUse", "PreCompact", "SessionStart", "Stop"])
+        self.assertEqual(len(installed["hooks"]["Stop"]), 3)
+        self.assertEqual(installed["hooks"]["PostToolUse"][0]["matcher"], "WebSearch|WebFetch")
         self.assertEqual(len(installed["hooks"]["PermissionRequest"]), 1)
         self.assertEqual(installed["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], 600)
         self.assertIn("huddle_statusline.py", installed["statusLine"]["command"])

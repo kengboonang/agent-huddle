@@ -380,6 +380,12 @@ struct DetailView: View {
                 }
                 UsageLine(session: session, long: true)
                 Spacer()
+                if let evidence = session.evidence {
+                    Button("Sources") { NSWorkspace.shared.open(evidence) }
+                        .buttonStyle(.link)
+                        .font(.system(size: 10))
+                        .help("Open the log of every web search and page this session read")
+                }
                 Text(session.status?.model ?? session.usage.model)
                     .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
             }

@@ -34,3 +34,21 @@ public struct BuddyTraits: Equatable {
         return hash
     }
 }
+
+/// Where the evidence hook keeps its log for a session.
+public enum Evidence {
+    /// The folder name the hooks use for a working directory: every character that is not a letter or digit becomes "-".
+    public static func slug(_ cwd: String) -> String {
+        let mapped = String(cwd.unicodeScalars.map { scalar -> Character in
+            let isPlain = scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar))
+            return isPlain ? Character(scalar) : "-"
+        })
+        let trimmed = mapped.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? "unknown" : trimmed
+    }
+
+    public static func file(home: URL = FileManager.default.homeDirectoryForCurrentUser, cwd: String, sessionId: String) -> URL {
+        home.appendingPathComponent("claude-evidence").appendingPathComponent(slug(cwd))
+            .appendingPathComponent(sessionId).appendingPathComponent("evidence.md")
+    }
+}

@@ -38,11 +38,12 @@ cd ~/agent-huddle
 The installer:
 
 1. Builds the app and puts it in `~/Applications/Agent Huddle.app`.
-2. Copies three scripts to `~/.claude/huddle/bin/`.
+2. Copies four scripts to `~/.claude/huddle/bin/`.
 3. Changes `~/.claude/settings.json` (a dated backup is saved next to it):
    - a `PermissionRequest` hook, so requests reach the widget;
    - a status line, which is how Claude Code hands over limits, context percent and cost;
    - `Stop`, `PreCompact` and `SessionStart` hooks for handoff documents;
+   - `PostToolUse` and `Stop` hooks for the evidence log;
    - permission rules: sessions may read and write `~/claude-handoffs`, and may not edit `~/.claude/huddle`.
 4. Adds a login item, so the widget starts when you log in.
 
@@ -105,6 +106,29 @@ Settings, as environment variables: `HANDOFF_THRESHOLD` (70), `HANDOFF_UPDATE_TH
 `HANDOFF_CONTEXT_WINDOW` (200000, used only when the status line has not reported the real size),
 `HANDOFF_DIR` (`~/claude-handoffs`).
 
+## Evidence log for web searches
+
+`hooks/evidence.py` lets you check what Claude really searched and read.
+
+| When | What happens |
+|---|---|
+| After every web search or page read | The query or address, the result links, and exactly what came back to Claude are added to `evidence.md` |
+| A turn ends | You see one line: how many searches and pages, and a link to the file |
+| A turn ends with links in the answer | Each link is compared with everything searched, fetched, read or typed in the session. Links found nowhere are listed for you as "Not checked", and Claude is asked once to check or remove them |
+
+Files are kept in `~/claude-evidence/<folder>/<session id>/`. The widget shows a "Sources" link on a
+session that has a log.
+
+What it cannot do:
+
+- A page read gives Claude a summary made by a small model, not the page. The log shows that summary;
+  open the address to see the page itself.
+- It checks that a link was seen, not that the answer describes the page correctly.
+- A link Claude builds from parts (for example a GitHub address from an owner and a name) is reported
+  as not checked, even when it is right.
+
+Set `EVIDENCE_NUDGE=0` to only report unchecked links and not ask Claude to fix them.
+
 ## Tests
 
 ```sh
@@ -132,6 +156,7 @@ HUDDLE_SNAPSHOT=/tmp/live.png .build/debug/AgentHuddle                          
 | `hooks/huddle_hook.py` | The permission hook |
 | `hooks/huddle_statusline.py` | The status line |
 | `hooks/handoff.py` | The handoff hook |
+| `hooks/evidence.py` | The evidence log hook |
 | `scripts/settings.py` | Adds and removes the settings entries |
 
 ## License and credit

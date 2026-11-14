@@ -260,3 +260,15 @@ private func assistant(id: String, blocks: [[String: Any]], input: Int = 10, cac
         #expect(Set(buddies.map(\.name)).count > 15)
     }
 }
+
+@Suite struct EvidenceTests {
+    @Test func folderNameMatchesTheHookScripts() {
+        // Same rule as slug() in hooks/evidence.py and hooks/handoff.py.
+        #expect(Evidence.slug("/work/app") == "work-app")
+        #expect(Evidence.slug("/Users/me/My Project (v2)/") == "Users-me-My-Project--v2")
+        #expect(Evidence.slug("/Users/m\u{e9}/app") == "Users-m--app")
+        #expect(Evidence.slug("") == "unknown")
+        let file = Evidence.file(home: URL(fileURLWithPath: "/home/me"), cwd: "/work/app", sessionId: "s1")
+        #expect(file.path == "/home/me/claude-evidence/work-app/s1/evidence.md")
+    }
+}

@@ -40,7 +40,7 @@ codesign --force --sign - "$APP" >/dev/null 2>&1
 
 mkdir -p "$BIN" "$HOME/claude-handoffs"
 chmod 700 "$HOME/.claude/huddle"
-cp "$ROOT/hooks/huddle_hook.py" "$ROOT/hooks/huddle_statusline.py" "$ROOT/hooks/handoff.py" "$BIN/"
+cp "$ROOT/hooks/huddle_hook.py" "$ROOT/hooks/huddle_statusline.py" "$ROOT/hooks/handoff.py" "$ROOT/hooks/evidence.py" "$BIN/"
 /usr/bin/python3 "$ROOT/scripts/settings.py" install
 
 if (( LOGIN_ITEM )); then

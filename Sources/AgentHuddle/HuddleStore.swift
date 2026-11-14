@@ -9,6 +9,8 @@ struct AgentSession: Identifiable {
     var usage = Usage()
     var title: String?
     var status: SessionStatus?
+    /// The evidence log for this session, when web tools have been used.
+    var evidence: URL?
 
     var id: String { info.sessionId }
     var buddy: BuddyTraits { BuddyTraits(seed: info.sessionId) }
@@ -240,6 +242,8 @@ final class HuddleStore: ObservableObject {
         for info in infos {
             if let at = hidden[info.sessionId], at == info.updatedAt { continue }
             var session = AgentSession(info: info, status: statusBySession[info.sessionId])
+            let evidence = Evidence.file(cwd: info.cwd, sessionId: info.sessionId)
+            if FileManager.default.fileExists(atPath: evidence.path) { session.evidence = evidence }
             if readers[info.sessionId] == nil, let path = Sessions.transcriptPath(paths, sessionId: info.sessionId) {
                 readers[info.sessionId] = TranscriptReader(path: path)
             }
