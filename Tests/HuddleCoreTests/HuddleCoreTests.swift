@@ -98,6 +98,19 @@ private func assistant(id: String, blocks: [[String: Any]], input: Int = 10, cac
         #expect(reader.steps.allSatisfy { $0.title.hasPrefix("prompt number ") })
     }
 
+    @Test func outputTotalCoversTheWholeOfABigTranscript() throws {
+        let lines: [[String: Any]] = (0..<100).map {
+            assistant(id: "m\($0)", blocks: [["type": "text", "text": "reply number \($0)"]], cacheRead: $0, output: 10)
+        }
+        let path = try tempFile(lines)
+        let reader = TranscriptReader(path: path)
+        reader.maxInitialBytes = 2000
+        reader.refresh()
+        #expect(reader.steps.count < 100)
+        #expect(reader.usage.outputTokens == 1000)
+        #expect(reader.usage.contextTokens == 10 + 99)
+    }
+
     @Test func missingFileIsNotAnError() {
         #expect(TranscriptReader(path: "/nonexistent/file.jsonl").refresh() == false)
     }

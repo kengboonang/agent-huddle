@@ -14,7 +14,10 @@ It also installs an automatic handoff hook, described [below](#automatic-handoff
   how full its context window is, the output tokens so far and the cost.
 - **Usage limits.** Your 5-hour and weekly limits, with the percent used and when each one resets.
 - **Step by step.** Click a session to see its prompts, tool calls (running, done or failed) and replies.
-- **Answer from the list.** A session that needs you moves to the top, with Allow and Deny on its row.
+- **Answer from the list.** A session that needs you moves to the top and shows the exact command or
+  path. Allow and Deny are on the row when the whole request fits there; a longer one opens in detail.
+  The buttons switch off for a moment whenever the request on screen changes, so a click cannot land
+  on a request you have not read.
 - **Answer in detail.** Allow, always allow or deny a permission request (with a note that tells
   Claude what to do instead), approve a plan, or answer a question Claude asks.
 - **Open or hide.** "Open" brings the session's window to the front. "Hide" removes a session from the
@@ -79,8 +82,6 @@ except your handoff documents.
 - **You cannot type a new prompt from the widget.** Claude Code has no documented way to send one to a
   running session. Use "Open".
 - **"Open" reaches the window, not the tab**, except in Terminal, where it selects the tab.
-- **Token counts for long sessions start from the last 3 MB of the transcript**, so the output total of
-  a very long session can be low. The context figure is always current.
 - **A session can still approve itself through the shell.** The deny rule stops Claude's file tools from
   writing answers into `~/.claude/huddle`, but a Bash command you have already allowed could. Keep
   broad Bash allow rules out of your settings.

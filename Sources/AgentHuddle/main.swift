@@ -73,8 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let point = NSPointFromString(saved)
             if NSScreen.screens.contains(where: { $0.frame.insetBy(dx: -1, dy: -1).contains(point) }) { return point }
         }
-        let visible = (NSScreen.main ?? NSScreen.screens[0]).visibleFrame
-        return NSPoint(x: visible.maxX - 16, y: visible.minY + 16)
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return NSPoint(x: 400, y: 100) }
+        return NSPoint(x: screen.visibleFrame.maxX - 16, y: screen.visibleFrame.minY + 16)
     }
 
     private func fit(expanded: Bool) {
@@ -115,7 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         // Without the heartbeat, hooks stop waiting and Claude Code asks in the session again.
-        try? FileManager.default.removeItem(at: store.paths.heartbeat)
+        // Only the real widget removes it; a snapshot or demo run leaves it alone.
+        store.stop()
     }
 
     // MARK: Snapshot
@@ -124,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func snapshot(to path: String) {
         if ProcessInfo.processInfo.environment["HUDDLE_DEMO"] == nil {
             // Real data: read the live sessions for a moment before drawing.
-            store.start()
+            store.start(heartbeat: false)
             RunLoop.main.run(until: Date().addingTimeInterval(2.5))
             store.expanded = true
             if let select = ProcessInfo.processInfo.environment["HUDDLE_SELECT"] { store.selected = select }

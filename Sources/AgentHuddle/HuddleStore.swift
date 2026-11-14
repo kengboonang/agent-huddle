@@ -53,12 +53,19 @@ final class HuddleStore: ObservableObject {
     @Published var customText: [String: String] = [:]
     @Published var denyNote: [String: String] = [:]
 
+    /// False for a moment after the request on screen changes, so a click meant for one request
+    /// cannot land on another that has just taken its place.
+    @Published var armed = true
+
     /// Called when a session starts waiting on the person.
     var onAttention: (() -> Void)?
 
     let paths: HuddlePaths
     private let demo: Bool
     private var timer: Timer?
+    private var heartbeatTimer: DispatchSourceTimer?
+    /// True when this instance is the real widget, which owns the heartbeat file.
+    private(set) var ownsHeartbeat = false
     private let scanQueue = DispatchQueue(label: "huddle.scan")
     private var readers: [String: TranscriptReader] = [:]
     private var scanning = false
@@ -75,14 +82,34 @@ final class HuddleStore: ObservableObject {
         }
     }
 
-    func start() {
+    /// `heartbeat: false` reads the live data without telling hooks that a widget is there to answer.
+    func start(heartbeat: Bool = true) {
         guard !demo else { return }
         for folder in [paths.huddle, paths.pending, paths.responses, paths.status] {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
                                                      attributes: [.posixPermissions: 0o700])
         }
+        if heartbeat {
+            // The heartbeat has its own background timer, so an open menu or a busy main thread
+            // cannot make hooks think the widget has quit.
+            ownsHeartbeat = true
+            let beat = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            let file = paths.heartbeat
+            beat.schedule(deadline: .now(), repeating: 1)
+            beat.setEventHandler { try? Data().write(to: file) }
+            beat.resume()
+            heartbeatTimer = beat
+        }
         tick()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() {
+        heartbeatTimer?.cancel()
+        heartbeatTimer = nil
+        if ownsHeartbeat { try? FileManager.default.removeItem(at: paths.heartbeat) }
     }
 
     // MARK: Reading
@@ -164,27 +191,53 @@ final class HuddleStore: ObservableObject {
 
     /// Hides a session from the list until it does something new.
     func dismiss(_ session: AgentSession) {
+        // A session that is waiting on the person must stay visible.
+        guard requests(for: session.id).isEmpty else { return }
         dismissed[session.id] = session.info.updatedAt
         if selected == session.id { selected = nil }
         sessions.removeAll { $0.id == session.id }
     }
 
     private func respond(_ request: PendingRequest, _ payload: [String: Any]) {
+        guard armed else { return }
+        if !demo {
+            // The card goes away only once the answer is really on disk.
+            guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+            let target = paths.responses.appendingPathComponent(request.id + ".json")
+            let temp = paths.responses.appendingPathComponent(request.id + ".json.part")
+            try? FileManager.default.createDirectory(at: paths.responses, withIntermediateDirectories: true,
+                                                     attributes: [.posixPermissions: 0o700])
+            guard FileManager.default.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600])
+            else { NSSound.beep(); return }
+            try? FileManager.default.removeItem(at: target)
+            do { try FileManager.default.moveItem(at: temp, to: target) } catch { NSSound.beep(); return }
+        }
         answered.insert(request.id)
         pending.removeAll { $0.id == request.id }
-        guard !demo, let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
-        let target = paths.responses.appendingPathComponent(request.id + ".json")
-        let temp = paths.responses.appendingPathComponent(request.id + ".json.part")
-        FileManager.default.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600])
-        try? FileManager.default.removeItem(at: target)
-        try? FileManager.default.moveItem(at: temp, to: target)
+        pause()
+    }
+
+    /// Switches the answer buttons off for a moment.
+    private func pause() {
+        armed = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.armed = true }
+    }
+
+    /// A request whose session is hidden or not in the list still needs a row, so it can be answered.
+    private func withPlaceholders(_ list: [AgentSession]) -> [AgentSession] {
+        var list = list
+        for request in pending where !list.contains(where: { $0.id == request.sessionId }) {
+            let info = SessionInfo(pid: 0, sessionId: request.sessionId, cwd: request.cwd, name: "",
+                                   rawStatus: "busy", entrypoint: "", startedAt: request.createdAt, updatedAt: request.createdAt)
+            list.append(AgentSession(info: info))
+        }
+        return list
     }
 
     // MARK: Refresh
 
     private func tick() {
         now = Date()
-        try? Data().write(to: paths.heartbeat)
         loadPending()
         loadSessions()
     }
@@ -204,13 +257,32 @@ final class HuddleStore: ObservableObject {
         let ids = Set(found.map(\.id))
         let fresh = found.filter { !knownPending.contains($0.id) }
         knownPending = ids
-        answered.formIntersection(Set(files.map { $0.deletingPathExtension().lastPathComponent }))
-        if ids != Set(pending.map(\.id)) { pending = found }
+        let onDisk = Set(files.map { $0.deletingPathExtension().lastPathComponent })
+        answered.formIntersection(onDisk)
+        sweepResponses(keeping: onDisk)
+        if ids != Set(pending.map(\.id)) {
+            // What is on screen is about to change, so hold the buttons for a moment.
+            if !pending.isEmpty || !fresh.isEmpty { pause() }
+            pending = found
+            for request in found { dismissed[request.sessionId] = nil }
+            sessions = withPlaceholders(sessions)
+        }
         if let first = fresh.first {
-            selected = first.sessionId
+            // Do not pull the person away from a request they are reading or answering.
+            let busyAnswering = selected.map { !requests(for: $0).filter { $0.id != first.id }.isEmpty } ?? false
+            if !busyAnswering { selected = first.sessionId }
             expanded = true
             NSSound(named: "Glass")?.play()
             onAttention?()
+        }
+    }
+
+    /// Removes answers that no hook is waiting for any more.
+    private func sweepResponses(keeping ids: Set<String>) {
+        let files = (try? FileManager.default.contentsOfDirectory(at: paths.responses, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for file in files where !ids.contains(file.deletingPathExtension().lastPathComponent) {
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if now.timeIntervalSince(modified) > 5 { try? FileManager.default.removeItem(at: file) }
         }
     }
 
@@ -261,7 +333,7 @@ final class HuddleStore: ObservableObject {
     }
 
     private func apply(_ result: [AgentSession], _ statuses: [SessionStatus], _ live: Set<String>) {
-        sessions = result
+        sessions = withPlaceholders(result.filter { dismissed[$0.id] == nil })
         dismissed = dismissed.filter { live.contains($0.key) }
         if let newest = StatusFiles.newestLimits(statuses) {
             limits = newest.limits.filter { ($0.resetsAt ?? .distantFuture) > now }

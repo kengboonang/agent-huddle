@@ -39,6 +39,7 @@ public final class TranscriptReader {
             if size > maxInitialBytes {
                 offset = size - maxInitialBytes
                 skipPartialLine = true
+                countUsage(in: handle, upTo: offset)
             }
         }
         guard size > offset else { return false }
@@ -52,6 +53,42 @@ public final class TranscriptReader {
         for line in lines { parse(Data(line)) }
         if steps.count > maxSteps { steps.removeFirst(steps.count - maxSteps) }
         return true
+    }
+
+    /// Adds up the tokens in the part of a big transcript whose steps are not shown,
+    /// so the output total covers the whole session.
+    private func countUsage(in handle: FileHandle, upTo end: UInt64) {
+        try? handle.seek(toOffset: 0)
+        var carry = Data()
+        var position: UInt64 = 0
+        let marker = Data("\"output_tokens\"".utf8)
+        while position < end {
+            let chunk = handle.readData(ofLength: Int(min(1_048_576, end - position)))
+            if chunk.isEmpty { break }
+            position += UInt64(chunk.count)
+            carry.append(chunk)
+            guard let lastNewline = carry.lastIndex(of: 0x0A) else { continue }
+            for line in carry[carry.startIndex..<lastNewline].split(separator: 0x0A) where line.range(of: marker) != nil {
+                guard let entry = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                      entry["type"] as? String == "assistant", entry["isSidechain"] as? Bool != true,
+                      let message = entry["message"] as? [String: Any] else { continue }
+                readUsage(message)
+            }
+            carry = Data(carry[carry.index(after: lastNewline)...])
+        }
+        // The line that crosses the boundary is skipped by the main read, so finish it here.
+        while carry.firstIndex(of: 0x0A) == nil {
+            let more = handle.readData(ofLength: 65_536)
+            if more.isEmpty { break }
+            carry.append(more)
+        }
+        let last = carry.prefix(upTo: carry.firstIndex(of: 0x0A) ?? carry.endIndex)
+        if last.range(of: marker) != nil,
+           let entry = (try? JSONSerialization.jsonObject(with: Data(last))) as? [String: Any],
+           entry["type"] as? String == "assistant", entry["isSidechain"] as? Bool != true,
+           let message = entry["message"] as? [String: Any] {
+            readUsage(message)
+        }
     }
 
     private func reset() {

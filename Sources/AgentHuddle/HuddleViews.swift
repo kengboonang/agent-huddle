@@ -259,6 +259,17 @@ struct SessionRow: View {
                             .foregroundStyle(request == nil ? Color.secondary : Color.orange)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
+                        if let request, !request.isQuestion, !request.isPlan, !request.summary.isEmpty {
+                            // The exact command or path, never a description of it.
+                            Text(request.summary)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.primary)
+                                .lineLimit(QuickActions.maxLines)
+                                .multilineTextAlignment(.leading)
+                                .padding(6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+                        }
                         HStack(spacing: 6) {
                             if let percent = session.status?.contextPercent {
                                 Meter(fraction: percent / 100, height: 3).frame(width: 44)
@@ -287,7 +298,7 @@ struct SessionRow: View {
     private func needText(_ request: PendingRequest) -> String {
         if request.isQuestion { return "Has a question for you" }
         if request.isPlan { return "Has a plan for you to approve" }
-        let what = Format.oneLine(request.note.isEmpty ? request.summary : request.note, limit: 90)
+        let what = Format.oneLine(request.note, limit: 90)
         return "Wants to use \(Format.toolName(request.toolName))" + (what.isEmpty ? "" : ": \(what)")
     }
 }
@@ -297,6 +308,15 @@ struct QuickActions: View {
     @ObservedObject var store: HuddleStore
     var request: PendingRequest
     var session: AgentSession
+
+    static let maxLines = 3
+    static let maxCharacters = 130
+
+    /// Allow and Deny are offered on the row only when the whole request is visible there.
+    static func fitsOnRow(_ request: PendingRequest) -> Bool {
+        let text = request.summary
+        return !text.isEmpty && text.count <= maxCharacters && !text.contains(where: \.isNewline)
+    }
 
     var body: some View {
         HStack {
@@ -308,14 +328,19 @@ struct QuickActions: View {
             if request.isQuestion || request.isPlan {
                 Button(request.isQuestion ? "Answer" : "Review plan") { store.selected = session.id }
                     .buttonStyle(.borderedProminent)
-            } else {
+            } else if Self.fitsOnRow(request) {
                 Button("Details") { store.selected = session.id }
                 Button("Deny") { store.deny(request) }
                 Button("Allow") { store.allow(request) }
                     .buttonStyle(.borderedProminent)
+            } else {
+                Button("Read and decide") { store.selected = session.id }
+                    .buttonStyle(.borderedProminent)
+                    .help("This request is too long to show here in full")
             }
         }
         .controlSize(.small)
+        .disabled(!store.armed)
     }
 }
 
@@ -368,6 +393,7 @@ struct DetailView: View {
                 Button("Open") { store.jump(to: session) }
                     .help("Bring this session's window to the front")
                 Button("Hide") { store.dismiss(session) }
+                    .disabled(!requests.isEmpty)
                     .help("Remove from the list until this session does something new")
             }
             .controlSize(.small)
@@ -395,6 +421,7 @@ struct DetailView: View {
 
             if let request = requests.first {
                 RequestCard(store: store, request: request, waiting: requests.count)
+                    .disabled(!store.armed)
                 Divider()
             }
             Timeline(steps: session.steps, now: store.now)
