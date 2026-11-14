@@ -294,6 +294,25 @@ class HandoffTests(HomeCase):
         for unwanted in ("meta", "system-reminder", "subagent prompt"):
             self.assertNotIn(unwanted, snapshot)
 
+    def test_a_broken_emoji_in_the_transcript_does_not_lose_the_snapshot(self):
+        with open(self.transcript, "w") as f:
+            f.write('{"type":"user","message":{"content":"Build the export \\ud83d"}}\n')
+        result = run("hooks/handoff.py", dict(self.base, hook_event_name="PreCompact"), self.home)
+        self.assertIn("keep: the user's goal", result.stdout)
+        with open(os.path.join(self.folder, "snapshot.md"), encoding="utf-8") as f:
+            self.assertIn("Build the export", f.read())
+
+    def test_notes_stay_in_one_folder_when_the_working_folder_changes(self):
+        self.status(72)
+        self.assertIn(os.path.join(self.folder, "handoff.md"), self.stop())
+        self.base["cwd"] = "/work/app/sub"
+        self.status(82)
+        self.assertIn(os.path.join(self.folder, "handoff.md"), self.stop())
+
+    def test_more_tokens_than_a_200k_window_means_the_1m_window(self):
+        write_lines(self.transcript, [assistant([{"type": "text", "text": "hi"}], tokens=260_000)])
+        self.assertIsNone(self.stop(), "260k of 1M is 26%")
+
     def test_precompact_works_with_no_transcript(self):
         result = run("hooks/handoff.py", dict(self.base, hook_event_name="PreCompact", transcript_path="/missing"), self.home)
         self.assertEqual(result.returncode, 0)
@@ -429,6 +448,33 @@ class EvidenceTests(HomeCase):
         self.assertIsNone(self.stop("Done: https://user-gave.example.com/page and https://github.com/me/repo.git"))
         output = self.stop("As I said, https://claude-said.example.com")
         self.assertIn("https://claude-said.example.com", output["systemMessage"])
+
+    def test_a_link_claude_passed_to_a_tool_counts_as_seen(self):
+        write_lines(self.transcript, [assistant([{"type": "tool_use", "id": "b1", "name": "Bash",
+                                                  "input": {"command": "curl -s https://api.example.com/v1/status"}}])])
+        self.assertIsNone(self.stop("Checked https://api.example.com/v1/status and it is up."))
+
+    def test_small_differences_in_how_a_link_is_written_do_not_matter(self):
+        self.tool("WebSearch", {"query": "agent huddle"}, self.SEARCH)
+        for answer in (u"See https://docs.example.com/hooks\u3002", u"See \u201chttps://docs.example.com/hooks\u201d",
+                       "See http://www.docs.example.com/hooks/", "See https://docs.example.com/hooks#install."):
+            output = self.stop(answer)
+            self.assertTrue(output is None or "Not checked" not in output["systemMessage"], answer)
+
+    def test_the_report_shows_the_link_as_it_was_written(self):
+        output = self.stop("Read https://WWW.Made-Up.example.org/Paper.")
+        self.assertIn("https://WWW.Made-Up.example.org/Paper", output["systemMessage"])
+
+    def test_a_broken_emoji_does_not_stop_the_log(self):
+        self.tool("WebFetch", {"url": "https://example.com/huddle"}, dict(self.FETCH, result="cut text \ud83d"))
+        self.assertIn("cut text", self.evidence())
+
+    def test_the_log_stays_in_one_folder_when_the_working_folder_changes(self):
+        self.tool("WebSearch", {"query": "one"}, self.SEARCH)
+        self.base["cwd"] = "/work/app/sub"
+        self.tool("WebSearch", {"query": "two"}, self.SEARCH)
+        self.assertEqual(self.evidence().count("Web search"), 2)
+        self.assertEqual(os.listdir(os.path.join(self.home, "claude-evidence")), ["work-app"])
 
     def test_an_answer_without_links_is_silent(self):
         self.assertIsNone(self.stop("All done, no links."))

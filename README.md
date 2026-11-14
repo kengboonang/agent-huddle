@@ -92,7 +92,7 @@ except your handoff documents.
 | When | What happens |
 |---|---|
 | A turn ends with the context 70% full | Claude is asked to write `handoff.md`: goal, current state, decisions, key files and commands, what failed, next steps, open questions |
-| A turn ends with the context 85% full | Claude is asked to bring `handoff.md` up to date |
+| A turn ends with the context 80% full | Claude is asked to bring `handoff.md` up to date |
 | Just before any compaction | A script saves `snapshot.md` from the transcript (your requests, the task list, edited files, failed commands, Claude's last messages, git status) and tells the summary what to keep |
 | Right after a compaction | Both documents are given back to Claude |
 | A new session starts in the same folder | Claude is told where the latest notes are (not shown the notes), if they are less than 7 days old |
@@ -102,7 +102,7 @@ Documents are kept in `~/claude-handoffs/<folder>/<session id>/`.
 The snapshot needs no model, so it is written every time, even when Claude never wrote a handoff.
 It records what happened but not why; the reasons are in `handoff.md`.
 
-Settings, as environment variables: `HANDOFF_THRESHOLD` (70), `HANDOFF_UPDATE_THRESHOLD` (85),
+Settings, as environment variables: `HANDOFF_THRESHOLD` (70), `HANDOFF_UPDATE_THRESHOLD` (80),
 `HANDOFF_CONTEXT_WINDOW` (200000, used only when the status line has not reported the real size),
 `HANDOFF_DIR` (`~/claude-handoffs`).
 

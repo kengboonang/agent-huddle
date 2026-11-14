@@ -13,6 +13,7 @@ One script, three hooks:
 
 Documents are kept in ~/claude-handoffs/<project>/<session id>/.
 """
+import io
 import json
 import os
 import re
@@ -24,7 +25,7 @@ HOME = os.path.expanduser("~")
 ROOT = os.environ.get("HANDOFF_DIR") or os.path.join(HOME, "claude-handoffs")
 STATUS = os.path.join(HOME, ".claude", "huddle", "status")
 FIRST_THRESHOLD = float(os.environ.get("HANDOFF_THRESHOLD", "70"))
-UPDATE_THRESHOLD = float(os.environ.get("HANDOFF_UPDATE_THRESHOLD", "85"))
+UPDATE_THRESHOLD = float(os.environ.get("HANDOFF_UPDATE_THRESHOLD", "80"))
 DEFAULT_WINDOW = int(os.environ.get("HANDOFF_CONTEXT_WINDOW", "200000"))
 STATUS_MAX_AGE = 900
 POINTER_MAX_AGE = 7 * 86400
@@ -53,12 +54,20 @@ def slug(cwd):
 
 
 def session_dir(cwd, session_id):
-    return os.path.join(ROOT, slug(cwd), re.sub(r"[^A-Za-z0-9_-]", "", session_id or "unknown"))
+    """One folder per session. It stays where it was first made, even if the working folder changes later."""
+    session = re.sub(r"[^A-Za-z0-9_-]", "", session_id or "unknown")
+    try:
+        for project in sorted(os.listdir(ROOT)):
+            if os.path.isdir(os.path.join(ROOT, project, session)):
+                return os.path.join(ROOT, project, session)
+    except OSError:
+        pass
+    return os.path.join(ROOT, slug(cwd), session)
 
 
 def read_json(path):
     try:
-        with open(path) as f:
+        with io.open(path, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return None
@@ -67,7 +76,7 @@ def read_json(path):
 def write_text(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with io.open(tmp, "w", encoding="utf-8", errors="replace") as f:
         f.write(text)
     os.replace(tmp, path)
 
@@ -120,6 +129,9 @@ def context_percent(data, now=None):
                          ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
     if tokens is None:
         return None
+    if tokens > window:
+        # More tokens than the assumed window can hold, so this must be the 1M-token window.
+        window = 1_000_000
     return 100.0 * tokens / window
 
 
@@ -287,7 +299,7 @@ def remember_latest(cwd, folder):
 
 def read_capped(path, limit):
     try:
-        with open(path) as f:
+        with io.open(path, encoding="utf-8", errors="replace") as f:
             text = f.read()
     except OSError:
         return ""
@@ -313,7 +325,7 @@ def on_session_start(data, now=None):
         context = "\n\n".join(parts)
     elif source in ("startup", "clear"):
         try:
-            with open(os.path.join(ROOT, slug(data.get("cwd")), "latest")) as f:
+            with io.open(os.path.join(ROOT, slug(data.get("cwd")), "latest"), encoding="utf-8") as f:
                 folder = f.read().strip()
         except OSError:
             return None
@@ -351,7 +363,7 @@ def main():
             output = on_session_start(data)
         else:
             output = None
-    except OSError:
+    except Exception:
         # A handoff problem must never get in the way of the session.
         return
     if isinstance(output, str):

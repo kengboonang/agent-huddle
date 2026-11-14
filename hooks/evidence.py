@@ -15,6 +15,7 @@ Two hooks, so you can check what Claude really searched and read:
 
 Files are kept in ~/claude-evidence/<project>/<session id>/.
 """
+import io
 import json
 import os
 import re
@@ -24,7 +25,7 @@ import time
 HOME = os.path.expanduser("~")
 ROOT = os.environ.get("EVIDENCE_DIR") or os.path.join(HOME, "claude-evidence")
 NUDGE = os.environ.get("EVIDENCE_NUDGE", "1") != "0"
-URL = re.compile(r"https?://[^\s\"'<>\\)\]}`|]+")
+URL = re.compile(u"https?://[^\\s\"'<>\\\\)\\]}`|\u3002\uff0c\u3001\uff1b\uff1a\uff09\u3011\u300d\u201c\u201d\u2018\u2019\u2026]+")
 RESULT_LIMIT = 6000
 
 
@@ -33,16 +34,24 @@ def slug(cwd):
 
 
 def session_dir(data):
+    """One folder per session. It stays where it was first made, even if the working folder changes later."""
     session = re.sub(r"[^A-Za-z0-9_-]", "", data.get("session_id") or "unknown")
+    try:
+        for project in sorted(os.listdir(ROOT)):
+            if os.path.isdir(os.path.join(ROOT, project, session)):
+                return os.path.join(ROOT, project, session)
+    except OSError:
+        pass
     return os.path.join(ROOT, slug(data.get("cwd")), session)
 
 
 def normalise(url):
+    """The form used to compare two addresses: no http/https, no www, no #part, no trailing slash."""
     url = url.split("#")[0].rstrip(".,;:!?*_")
-    match = re.match(r"(https?://)([^/]+)(.*)", url, re.I)
+    match = re.match(r"https?://(?:www\.)?([^/]+)(.*)", url, re.I)
     if not match:
         return url
-    return match.group(1).lower() + match.group(2).lower() + match.group(3).rstrip("/")
+    return match.group(1).lower() + match.group(2).rstrip("/")
 
 
 def urls_in(value):
@@ -62,7 +71,7 @@ def urls_in(value):
 def read_records(folder):
     records = []
     try:
-        with open(os.path.join(folder, "log.jsonl")) as f:
+        with io.open(os.path.join(folder, "log.jsonl"), encoding="utf-8", errors="replace") as f:
             for line in f:
                 try:
                     records.append(json.loads(line))
@@ -148,11 +157,11 @@ def on_tool(data):
     os.makedirs(folder, exist_ok=True)
     record = {"time": time.time(), "tool": data["tool_name"], "id": data.get("tool_use_id"),
               "input": data.get("tool_input") or {}, "response": data.get("tool_response")}
-    with open(os.path.join(folder, "log.jsonl"), "a") as f:
+    with io.open(os.path.join(folder, "log.jsonl"), "a", encoding="utf-8", errors="replace") as f:
         f.write(json.dumps(record) + "\n")
     path = os.path.join(folder, "evidence.md")
     new = not os.path.exists(path)
-    with open(path, "a") as f:
+    with io.open(path, "a", encoding="utf-8", errors="replace") as f:
         if new:
             f.write("# Evidence log\n\nEvery web search and page read in this session, with what came back.\n\n"
                     "- Folder: `%s`\n- Session: `%s`\n\n" % (data.get("cwd") or "", data.get("session_id") or ""))
@@ -161,20 +170,28 @@ def on_tool(data):
 
 
 def seen_in_transcript(path):
-    """Links in what the user typed and in every tool result (files read, command output and so on)."""
+    """Links in what the user typed, in every tool result (files read, command output and so on),
+    and in what Claude passed to a tool (for example a curl command)."""
     found = set()
     try:
         with open(path, "rb") as f:
             for raw in f:
-                if b'"type":"user"' not in raw or b"http" not in raw:
+                if b"http" not in raw or (b'"type":"user"' not in raw and b'"type":"assistant"' not in raw):
                     continue
                 try:
                     entry = json.loads(raw)
                 except ValueError:
                     continue
-                if isinstance(entry, dict) and entry.get("type") == "user":
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("type") == "user":
                     found |= urls_in(entry.get("message"))
                     found |= urls_in(entry.get("toolUseResult"))
+                elif entry.get("type") == "assistant":
+                    content = (entry.get("message") or {}).get("content")
+                    for block in content if isinstance(content, list) else []:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            found |= urls_in(block.get("input"))
     except OSError:
         pass
     return found
@@ -185,12 +202,14 @@ def on_stop(data):
     records = read_records(folder)
     state_path = os.path.join(folder, "state.json")
     try:
-        with open(state_path) as f:
+        with io.open(state_path, encoding="utf-8") as f:
             reported = json.load(f).get("reported", 0)
     except (OSError, ValueError):
         reported = 0
     fresh = records[reported:]
-    answer_links = urls_in(data.get("last_assistant_message") or "")
+    answer_text = data.get("last_assistant_message") or ""
+    written = {normalise(u): u.split("#")[0].rstrip(".,;:!?*_") for u in URL.findall(answer_text)}
+    answer_links = set(written)
 
     unverified = []
     if answer_links:
@@ -198,7 +217,7 @@ def on_stop(data):
         missing = answer_links - known
         if missing:
             missing -= seen_in_transcript(data.get("transcript_path") or "")
-        unverified = sorted(missing)
+        unverified = sorted(written[m] for m in missing)
     if not fresh and not unverified:
         return None
 
@@ -235,7 +254,8 @@ def main():
     try:
         event = data.get("hook_event_name")
         output = on_tool(data) if event == "PostToolUse" else on_stop(data) if event == "Stop" else None
-    except OSError:
+    except Exception:
+        # A problem in this hook must never get in the way of the session.
         return
     if output:
         print(json.dumps(output))
