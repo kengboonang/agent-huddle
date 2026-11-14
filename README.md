@@ -1,11 +1,36 @@
 # Agent Huddle
 
-A small macOS widget that shows every Claude Code session you have running, lets you answer them
-from one place, and shows how much of your usage limits you have left.
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue?style=flat-square) ![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
-It also installs an automatic handoff hook, described [below](#automatic-handoff-documents).
+Agent Huddle is a small macOS widget that keeps every Claude Code session you have running in one corner of your screen. See what each agent is doing, answer its permission requests and questions without switching windows, and watch how much of your usage limits is left. Each session gets its own little buddy that shows its mood: working, waiting, or in need of you.
 
-## What the widget does
+<img src="./docs/demo.gif" width="450" alt="Agent Huddle: the pill opens into a list of sessions, a permission request is allowed from the list, and a question is answered in the detail view" />
+
+*The demo uses sample data. Record it again with `HUDDLE_RECORD=docs/demo.gif .build/debug/AgentHuddle`.*
+
+## Get started
+
+You need macOS 14 or later, the Swift toolchain (`xcode-select --install`) and Claude Code.
+
+1. Get the code and install:
+
+    ```sh
+    git clone https://github.com/kengboonang/agent-huddle.git
+    cd agent-huddle
+    ./install.sh
+    ```
+
+2. Look in the bottom-right corner of your screen for the pill, and click it.
+
+3. Start a new Claude Code session. Sessions that were already open need a restart to use the new hooks.
+
+To remove everything except your handoff documents and evidence logs, run `./uninstall.sh`.
+
+## What it does
+
+| All sessions | A request | A question |
+|---|---|---|
+| ![The list of sessions with their buddies and usage limits](docs/list.png) | ![A permission request with numbered choices](docs/permission.png) | ![A question from Claude with options to pick](docs/question.png) |
 
 - **A buddy for each session.** Every session gets its own small character, always the same one for
   that session. It bobs while the session works, hops with a "!" when the session needs you, and
@@ -14,31 +39,26 @@ It also installs an automatic handoff hook, described [below](#automatic-handoff
   how full its context window is, the output tokens so far and the cost.
 - **Usage limits.** Your 5-hour and weekly limits, with the percent used and when each one resets.
 - **Step by step.** Click a session to see its prompts, tool calls (running, done or failed) and replies.
+- **Decide permissions with a click.** The request card works like Claude Code's own prompt:
+  "Yes", "Yes, and don't ask again", "No", or "No, and tell Claude what to do differently".
+  Plans are approved the same way.
+- **Answer questions.** Pick one or several of the options Claude offers, or type your own answer.
 - **Answer from the list.** A session that needs you moves to the top and shows the exact command or
   path. Allow and Deny are on the row when the whole request fits there; a longer one opens in detail.
   The buttons switch off for a moment whenever the request on screen changes, so a click cannot land
   on a request you have not read.
-- **Answer in detail.** Allow, always allow or deny a permission request (with a note that tells
-  Claude what to do instead), approve a plan, or answer a question Claude asks.
-- **Open or hide.** "Open" brings the session's window to the front. "Hide" removes a session from the
-  list until it does something new.
+- **Go to the session.** The arrow on every row brings the window where that session runs to the
+  front. In Terminal and iTerm it selects the tab; in VS Code, Cursor and Windsurf it brings up the
+  window that has the session's folder open.
 - **It tells you when you are needed.** The widget opens on the session and plays a sound. It plays a
   different sound when a session finishes working.
 
 The widget sits in the bottom-right corner as a small pill. Click the pill to open it. Drag the open
 panel by its background to move it. The menu bar icon shows or hides the widget and quits it.
 
-## Install
+## What the installer changes
 
-Needs macOS 14 or later, the Swift toolchain (`xcode-select --install`) and Claude Code.
-
-```sh
-git clone https://github.com/kengboonang/agent-huddle.git ~/agent-huddle
-cd ~/agent-huddle
-./install.sh                   # add --no-login-item to not start the widget at login
-```
-
-The installer:
+`./install.sh` (add `--no-login-item` to not start the widget at login):
 
 1. Builds the app and puts it in `~/Applications/Agent Huddle.app`.
 2. Copies four scripts to `~/.claude/huddle/bin/`.
@@ -50,8 +70,7 @@ The installer:
    - permission rules: sessions may read and write `~/claude-handoffs`, and may not edit `~/.claude/huddle`.
 4. Adds a login item, so the widget starts when you log in.
 
-Run `./install.sh` again after you change the code. Run `./uninstall.sh` to remove everything
-except your handoff documents.
+Run `./install.sh` again after you change the code.
 
 ## How it works
 
@@ -80,8 +99,10 @@ except your handoff documents.
 - **Limits are as fresh as the last terminal reply.** With no terminal session active, the numbers do
   not move.
 - **You cannot type a new prompt from the widget.** Claude Code has no documented way to send one to a
-  running session. Use "Open".
-- **"Open" reaches the window, not the tab**, except in Terminal, where it selects the tab.
+  running session. Use the arrow to go to the session.
+- **Going to a session in a VS Code-style editor opens the session's folder.** If that folder is not
+  already open in a window, the editor opens a new window for it. In other apps the app comes to the
+  front, but not a particular window.
 - **A session can still approve itself through the shell.** The deny rule stops Claude's file tools from
   writing answers into `~/.claude/huddle`, but a Bash command you have already allowed could. Keep
   broad Bash allow rules out of your settings.

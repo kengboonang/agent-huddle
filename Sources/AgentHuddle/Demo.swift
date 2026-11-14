@@ -49,24 +49,32 @@ enum Demo {
             store.selected = "a"
         case "permission", "needs":
             store.selected = mode == "needs" ? nil : "a"
-            store.pending = [PendingRequest(
-                id: "p1", sessionId: "a", toolName: "Bash",
-                toolInput: ["command": "npm install --save-dev @testing-library/user-event", "description": "Install the missing test package"],
-                suggestions: [["type": "addRules", "behavior": "allow", "destination": "localSettings",
-                               "rules": [["toolName": "Bash", "ruleContent": "npm install:*"]]]])]
+            store.pending = [permissionRequest()]
         case "question":
             store.selected = "a"
-            store.pending = [PendingRequest(
-                id: "q1", sessionId: "a", toolName: "AskUserQuestion",
-                toolInput: ["questions": [[
-                    "question": "Where should the order total sit on small screens?", "header": "Total",
-                    "multiSelect": false,
-                    "options": [["label": "Fixed footer", "description": "Always visible at the bottom of the screen"],
-                                ["label": "Below the list", "description": "Visible after scrolling past the items"]],
-                ]]])]
+            store.pending = [questionRequest()]
             store.picks["q1|Where should the order total sit on small screens?"] = ["Fixed footer"]
         default:
             break
         }
+    }
+
+    static func permissionRequest() -> PendingRequest {
+        PendingRequest(
+            id: "p1", sessionId: "a", toolName: "Bash",
+            toolInput: ["command": "npm install --save-dev @testing-library/user-event", "description": "Install the missing test package"],
+            suggestions: [["type": "addRules", "behavior": "allow", "destination": "localSettings",
+                           "rules": [["toolName": "Bash", "ruleContent": "npm install:*"]]]])
+    }
+
+    static func questionRequest() -> PendingRequest {
+        PendingRequest(
+            id: "q1", sessionId: "a", toolName: "AskUserQuestion",
+            toolInput: ["questions": [[
+                "question": "Where should the order total sit on small screens?", "header": "Total",
+                "multiSelect": false,
+                "options": [["label": "Fixed footer", "description": "Always visible at the bottom of the screen"],
+                            ["label": "Below the list", "description": "Visible after scrolling past the items"]],
+            ]]])
     }
 }

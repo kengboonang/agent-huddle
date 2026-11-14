@@ -59,23 +59,72 @@ struct PermissionBody: View {
                     .frame(height: summaryHeight)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
             }
-            TextField("Optional: tell Claude what to do instead", text: Binding(
-                get: { store.denyNote[request.id] ?? "" },
-                set: { store.denyNote[request.id] = $0 }))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11))
-            HStack {
-                Button("Deny") { store.deny(request) }
-                Spacer()
-                if !request.suggestions.isEmpty, !request.isPlan {
-                    Button("Always allow") { store.alwaysAllow(request) }
-                        .help("Allow, and also: \(Decisions.describe(request.suggestions))")
+            Text(request.isPlan ? "Approve this plan?" : "Do you want to proceed?")
+                .font(.system(size: 11, weight: .medium))
+            ChoiceRow(number: 1, title: request.isPlan ? "Yes, approve the plan" : "Yes") { store.allow(request) }
+            if canAlwaysAllow {
+                ChoiceRow(number: 2, title: "Yes, and don't ask again", detail: Decisions.describe(request.suggestions)) {
+                    store.alwaysAllow(request)
                 }
-                Button(request.isPlan ? "Approve plan" : "Allow") { store.allow(request) }
-                    .buttonStyle(.borderedProminent)
             }
-            .controlSize(.small)
+            ChoiceRow(number: canAlwaysAllow ? 3 : 2, title: "No") { store.deny(request) }
+            HStack(spacing: 6) {
+                TextField("No, and tell Claude what to do differently", text: Binding(
+                    get: { store.denyNote[request.id] ?? "" },
+                    set: { store.denyNote[request.id] = $0 }))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+                    .onSubmit { if hasNote { store.deny(request) } }
+                Button {
+                    store.deny(request)
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 16))
+                }
+                .buttonStyle(.borderless)
+                .disabled(!hasNote)
+                .help("Deny and send this note to Claude")
+            }
         }
+    }
+
+    private var canAlwaysAllow: Bool { !request.suggestions.isEmpty && !request.isPlan }
+
+    private var hasNote: Bool {
+        !(store.denyNote[request.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+/// One numbered choice, laid out like the choices in Claude Code's own prompts.
+struct ChoiceRow: View {
+    var number: Int
+    var title: String
+    var detail: String = ""
+    var action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 8) {
+                Text("\(number)")
+                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                    .frame(width: 16, height: 16)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 11, weight: .medium))
+                    if !detail.isEmpty {
+                        Text(detail).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering ? 0.14 : 0.06)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -126,7 +175,7 @@ struct QuestionBody: View {
             ForEach(question.options, id: \.label) { option in
                 optionRow(question, option, selected: store.picks[key]?.contains(option.label) ?? false)
             }
-            TextField("Or type your own answer", text: Binding(
+            TextField("Other: type your own answer", text: Binding(
                 get: { store.customText[key] ?? "" },
                 set: { store.customText[key] = $0 }))
                 .textFieldStyle(.roundedBorder)

@@ -3,11 +3,51 @@ import Darwin
 
 /// Brings the app (and, for Terminal, the tab) that runs a session to the front.
 enum Jumper {
-    static func activate(pid: Int32) {
+    /// Editors built on VS Code. Opening a folder that is already open brings that window to the front.
+    static let editors: Set<String> = [
+        "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium",
+        "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf",
+    ]
+
+    static func activate(pid: Int32, cwd: String) {
         guard let app = hostApp(pid: pid) else { return }
+        var isFolder: ObjCBool = false
+        if let id = app.bundleIdentifier, editors.contains(id), let bundle = app.bundleURL,
+           FileManager.default.fileExists(atPath: cwd, isDirectory: &isFolder), isFolder.boolValue {
+            NSWorkspace.shared.open([URL(fileURLWithPath: cwd)], withApplicationAt: bundle,
+                                    configuration: NSWorkspace.OpenConfiguration())
+            return
+        }
         app.activate(options: [.activateAllWindows])
-        if app.bundleIdentifier == "com.apple.Terminal", let tty = ttyName(pid) {
-            selectTerminalTab(tty: tty)
+        guard let tty = ttyName(pid), tty.range(of: "^/dev/[A-Za-z0-9]+$", options: .regularExpression) != nil else { return }
+        switch app.bundleIdentifier {
+        case "com.apple.Terminal": selectTerminalTab(tty: tty)
+        case "com.googlecode.iterm2": selectITermSession(tty: tty)
+        default: break
+        }
+    }
+
+    private static func selectITermSession(tty: String) {
+        run("""
+        tell application "iTerm2"
+            repeat with w in windows
+                repeat with t in tabs of w
+                    repeat with s in sessions of t
+                        if tty of s is "\(tty)" then
+                            select w
+                            select t
+                            select s
+                        end if
+                    end repeat
+                end repeat
+            end repeat
+        end tell
+        """)
+    }
+
+    private static func run(_ script: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            NSAppleScript(source: script)?.executeAndReturnError(nil)
         }
     }
 
@@ -46,9 +86,7 @@ enum Jumper {
     }
 
     private static func selectTerminalTab(tty: String) {
-        // The tty comes from the system and only ever looks like /dev/ttys003.
-        guard tty.range(of: "^/dev/[A-Za-z0-9]+$", options: .regularExpression) != nil else { return }
-        let script = """
+        run("""
         tell application "Terminal"
             repeat with w in windows
                 repeat with t in tabs of w
@@ -59,9 +97,6 @@ enum Jumper {
                 end repeat
             end repeat
         end tell
-        """
-        DispatchQueue.global(qos: .userInitiated).async {
-            NSAppleScript(source: script)?.executeAndReturnError(nil)
-        }
+        """)
     }
 }

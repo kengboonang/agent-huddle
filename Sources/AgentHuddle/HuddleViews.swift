@@ -238,6 +238,7 @@ struct SessionRow: View {
         let activity = store.activity(session)
         let request = store.requests(for: session.id).first
         VStack(alignment: .leading, spacing: 8) {
+          HStack(alignment: .center, spacing: 4) {
             Button {
                 store.selected = session.id
             } label: {
@@ -283,6 +284,19 @@ struct SessionRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if session.info.pid > 0 {
+                Button {
+                    store.jump(to: session)
+                } label: {
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.system(size: 14))
+                        .frame(width: 26, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Go to the window where this session is running")
+            }
+          }
 
             if let request {
                 QuickActions(store: store, request: request, session: session)
@@ -390,9 +404,18 @@ struct DetailView: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Button("Open") { store.jump(to: session) }
-                    .help("Bring this session's window to the front")
-                Button("Hide") { store.dismiss(session) }
+                Button {
+                    store.jump(to: session)
+                } label: {
+                    Label("Go to session", systemImage: "arrow.up.forward.app")
+                }
+                .disabled(session.info.pid <= 0)
+                .help("Go to the window where this session is running")
+                Button {
+                    store.dismiss(session)
+                } label: {
+                    Image(systemName: "eye.slash")
+                }
                     .disabled(!requests.isEmpty)
                     .help("Remove from the list until this session does something new")
             }

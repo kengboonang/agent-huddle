@@ -9,6 +9,7 @@ struct BuddyView: View {
     var size: CGFloat = 36
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.buddyClock) private var fixedClock
 
     static let palette: [Color] = [
         Color(red: 0.98, green: 0.47, blue: 0.42), Color(red: 0.98, green: 0.70, blue: 0.26),
@@ -18,10 +19,18 @@ struct BuddyView: View {
     ]
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { timeline in
-            let time = reduceMotion ? 0.6 : timeline.date.timeIntervalSinceReferenceDate + traits.phase
-            Canvas { context, canvas in
-                draw(&context, canvas.width, time)
+        Group {
+            if let fixedClock {
+                Canvas { context, canvas in
+                    draw(&context, canvas.width, fixedClock + traits.phase)
+                }
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion)) { timeline in
+                    let time = reduceMotion ? 0.6 : timeline.date.timeIntervalSinceReferenceDate + traits.phase
+                    Canvas { context, canvas in
+                        draw(&context, canvas.width, time)
+                    }
+                }
             }
         }
         .frame(width: size, height: size)

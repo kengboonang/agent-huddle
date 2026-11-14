@@ -186,7 +186,7 @@ final class HuddleStore: ObservableObject {
     }
 
     func jump(to session: AgentSession) {
-        Jumper.activate(pid: session.info.pid)
+        Jumper.activate(pid: session.info.pid, cwd: session.info.cwd)
     }
 
     /// Hides a session from the list until it does something new.

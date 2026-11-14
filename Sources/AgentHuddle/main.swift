@@ -18,12 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let cornerKey = "panelCorner"
 
     override init() {
-        store = HuddleStore(demo: ProcessInfo.processInfo.environment["HUDDLE_DEMO"])
+        let env = ProcessInfo.processInfo.environment
+        store = HuddleStore(demo: env["HUDDLE_DEMO"] ?? (env["HUDDLE_RECORD"] == nil ? nil : "pill"))
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let env = ProcessInfo.processInfo.environment
+        if let path = env["HUDDLE_RECORD"] {
+            Recorder.record(to: path)
+            NSApp.terminate(nil)
+            return
+        }
         if let path = env["HUDDLE_SNAPSHOT"] {
             snapshot(to: path)
             NSApp.terminate(nil)
@@ -144,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 }
 
 let env = ProcessInfo.processInfo.environment
-if env["HUDDLE_SNAPSHOT"] == nil, env["HUDDLE_DEMO"] == nil,
+if env["HUDDLE_SNAPSHOT"] == nil, env["HUDDLE_DEMO"] == nil, env["HUDDLE_RECORD"] == nil,
    let bundle = Bundle.main.bundleIdentifier,
    NSRunningApplication.runningApplications(withBundleIdentifier: bundle).count > 1 {
     // Already running.
