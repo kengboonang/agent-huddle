@@ -19,6 +19,7 @@ enum Demo {
             Step(id: "5", kind: .tool, state: .failed, title: "Bash", detail: "Run the checkout tests", time: now.addingTimeInterval(-420)),
             Step(id: "6", kind: .tool, state: .running, title: "Bash", detail: "Install the missing test package", time: now.addingTimeInterval(-20)),
         ]
+        first.tasks = TaskProgress(done: 4, total: 6, current: "Fixing the checkout tests")
         first.usage.contextTokens = 84_300
         first.usage.outputTokens = 12_400
         first.usage.model = "claude-opus-5-5"
@@ -32,6 +33,7 @@ enum Demo {
 
         var third = AgentSession(info: info(3, "c", "Write release notes", "/Users/me/docs", "busy"))
         third.steps = [Step(id: "1", kind: .tool, state: .running, title: "Grep", detail: "BREAKING", time: now.addingTimeInterval(-5))]
+        third.tasks = TaskProgress(done: 2, total: 5, current: "Collecting breaking changes")
         third.usage.contextTokens = 156_000
         third.usage.outputTokens = 22_900
         third.status = SessionStatus(updatedAt: now, model: "Opus", contextPercent: 78, contextSize: 200_000, costUSD: 3.10)

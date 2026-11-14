@@ -6,18 +6,9 @@ struct RequestCard: View {
     @ObservedObject var store: HuddleStore
     var request: PendingRequest
     var waiting: Int
+    var session: AgentSession
 
-    /// Shows the whole card when it fits and scrolls it when it does not.
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            card
-            ScrollView { card }
-        }
-        .background(Color.orange.opacity(0.08))
-        .layoutPriority(1)
-    }
-
-    private var card: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(heading).font(.system(size: 12, weight: .semibold))
@@ -30,12 +21,13 @@ struct RequestCard: View {
                 }
             }
             if request.isQuestion {
-                QuestionBody(store: store, request: request)
+                QuestionBody(store: store, request: request, session: session)
             } else {
                 PermissionBody(store: store, request: request)
             }
         }
-        .padding(14)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.10)))
     }
 
     private var heading: String {
@@ -149,6 +141,7 @@ extension PermissionBody {
 struct QuestionBody: View {
     @ObservedObject var store: HuddleStore
     var request: PendingRequest
+    var session: AgentSession
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -156,6 +149,9 @@ struct QuestionBody: View {
                 questionView(question)
             }
             HStack {
+                Button("Answer in the session") { store.jump(to: session) }
+                    .disabled(session.info.pid <= 0)
+                    .help("Go to the window where this session is running and answer there")
                 Spacer()
                 Button("Send answer") { store.sendAnswers(request) }
                     .buttonStyle(.borderedProminent)

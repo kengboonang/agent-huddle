@@ -59,5 +59,5 @@ AGENT_PLIST
 fi
 
 open "$APP"
-echo "Agent Huddle is running: look in the bottom-right corner of the screen."
+echo "Agent Huddle is running: look in the top-right corner of the screen."
 echo "Sessions you start from now on use the new hooks. Restart sessions that are already open."

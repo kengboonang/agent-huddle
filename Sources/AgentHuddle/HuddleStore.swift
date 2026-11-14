@@ -9,6 +9,7 @@ struct AgentSession: Identifiable {
     var usage = Usage()
     var title: String?
     var status: SessionStatus?
+    var tasks: TaskProgress?
     /// The evidence log for this session, when web tools have been used.
     var evidence: URL?
 
@@ -56,6 +57,15 @@ final class HuddleStore: ObservableObject {
     /// False for a moment after the request on screen changes, so a click meant for one request
     /// cannot land on another that has just taken its place.
     @Published var armed = true
+    /// A short confirmation shown on a row after the person answers, such as "Allowed".
+    @Published var feedback: [String: String] = [:]
+    /// Height of the open panel, which follows its content up to a limit.
+    @Published var panelHeight: CGFloat = 300
+    @Published var muted = UserDefaults.standard.bool(forKey: "muted") {
+        didSet { UserDefaults.standard.set(muted, forKey: "muted") }
+    }
+    /// Called when the person closes the widget from its header.
+    var onClose: (() -> Void)?
 
     /// Called when a session starts waiting on the person.
     var onAttention: (() -> Void)?
@@ -142,15 +152,23 @@ final class HuddleStore: ObservableObject {
     // MARK: Actions
 
     func allow(_ request: PendingRequest) {
-        respond(request, Decisions.allow(request))
+        respond(request, Decisions.allow(request), say: request.isPlan ? "Plan approved" : "Allowed")
     }
 
     func alwaysAllow(_ request: PendingRequest) {
-        respond(request, Decisions.alwaysAllow(request))
+        respond(request, Decisions.alwaysAllow(request), say: "Always allowed")
     }
 
     func deny(_ request: PendingRequest) {
-        respond(request, Decisions.deny(note: denyNote[request.id] ?? ""))
+        respond(request, Decisions.deny(note: denyNote[request.id] ?? ""), say: "Denied")
+    }
+
+    func toggleSelection(_ id: String) {
+        selected = selected == id ? nil : id
+    }
+
+    private func play(_ name: String) {
+        if !muted { NSSound(named: name)?.play() }
     }
 
     func key(_ request: PendingRequest, _ question: Question) -> String {
@@ -182,7 +200,8 @@ final class HuddleStore: ObservableObject {
         guard canSend(request) else { return }
         var answers: [String: String] = [:]
         for question in request.questions { answers[question.question] = answer(request, question) }
-        respond(request, Decisions.answer(request, answers: answers))
+        let said = request.questions.count == 1 ? "Using \u{201C}\(answers.values.first ?? "")\u{201D}" : "Answered"
+        respond(request, Decisions.answer(request, answers: answers), say: said)
     }
 
     func jump(to session: AgentSession) {
@@ -198,8 +217,17 @@ final class HuddleStore: ObservableObject {
         sessions.removeAll { $0.id == session.id }
     }
 
-    private func respond(_ request: PendingRequest, _ payload: [String: Any]) {
+    private func respond(_ request: PendingRequest, _ payload: [String: Any], say: String) {
         guard armed else { return }
+        defer {
+            if answered.contains(request.id) {
+                let session = request.sessionId
+                feedback[session] = say
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    if self?.feedback[session] == say { self?.feedback[session] = nil }
+                }
+            }
+        }
         if !demo {
             // The card goes away only once the answer is really on disk.
             guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
@@ -272,7 +300,7 @@ final class HuddleStore: ObservableObject {
             let busyAnswering = selected.map { !requests(for: $0).filter { $0.id != first.id }.isEmpty } ?? false
             if !busyAnswering { selected = first.sessionId }
             expanded = true
-            NSSound(named: "Glass")?.play()
+            play("Glass")
             onAttention?()
         }
     }
@@ -323,6 +351,7 @@ final class HuddleStore: ObservableObject {
                 reader.refresh()
                 session.steps = reader.steps
                 session.usage = reader.usage
+                session.tasks = reader.tasks
                 session.title = reader.title
             }
             result.append(session)
@@ -347,7 +376,7 @@ final class HuddleStore: ObservableObject {
             let state = activity(session)
             current[session.id] = state
             if lastActivity[session.id] == .working, state == .idle {
-                NSSound(named: "Pop")?.play()
+                play("Pop")
             }
         }
         lastActivity = current

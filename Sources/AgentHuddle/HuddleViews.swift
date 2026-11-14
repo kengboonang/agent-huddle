@@ -3,7 +3,10 @@ import SwiftUI
 
 enum Layout {
     static let pill = CGSize(width: 280, height: 46)
-    static let panel = CGSize(width: 390, height: 580)
+    static let panelWidth: CGFloat = 390
+    /// The open panel is as tall as its content, up to this.
+    static let maxPanelHeight: CGFloat = 640
+    static let emptyListHeight: CGFloat = 170
 }
 
 extension Activity {
@@ -24,6 +27,22 @@ extension Activity {
     }
 }
 
+private struct HeaderHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct ListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private extension View {
+    func reportHeight<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == CGFloat {
+        background(GeometryReader { Color.clear.preference(key: key, value: $0.size.height) })
+    }
+}
+
 struct RootView: View {
     @ObservedObject var store: HuddleStore
 
@@ -31,7 +50,7 @@ struct RootView: View {
         Group {
             if store.expanded {
                 PanelView(store: store)
-                    .frame(width: Layout.panel.width, height: Layout.panel.height)
+                    .frame(width: Layout.panelWidth, height: store.panelHeight)
                     .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .windowBackgroundColor)))
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.12)))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -90,44 +109,87 @@ struct PillView: View {
 
 struct PanelView: View {
     @ObservedObject var store: HuddleStore
+    @State private var headerHeight: CGFloat = 110
+    @State private var listHeight: CGFloat = Layout.emptyListHeight
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Text("Agent Huddle").font(.system(size: 13, weight: .semibold))
-                ForEach([Activity.needsYou, .working, .idle], id: \.self) { activity in
-                    let count = store.sessions.filter { store.activity($0) == activity }.count
-                    if count > 0 { CountChip(count: count, activity: activity) }
-                }
-                Spacer()
-                Button {
-                    store.expanded = false
-                } label: {
-                    Image(systemName: "chevron.down").frame(width: 22, height: 22).contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("Shrink to a pill")
+            VStack(spacing: 0) {
+                header
+                LimitsView(store: store)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+                Divider()
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
+            .reportHeight(HeaderHeightKey.self)
 
-            LimitsView(store: store)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-            Divider()
-
-            ZStack {
-                if let session = store.session(store.selected) {
-                    DetailView(store: store, session: session)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                } else {
-                    SessionList(store: store)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+            if store.sessions.isEmpty {
+                EmptyList().frame(height: Layout.emptyListHeight)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach(store.ordered) { session in
+                                SessionRow(store: store, session: session).id(session.id)
+                            }
+                        }
+                        .padding(10)
+                        .reportHeight(ListHeightKey.self)
+                    }
+                    .onChange(of: store.selected) { _, selected in
+                        if let selected { withAnimation { proxy.scrollTo(selected, anchor: .top) } }
+                    }
                 }
             }
-            .animation(.easeOut(duration: 0.18), value: store.selected)
         }
+        .onPreferenceChange(HeaderHeightKey.self) { headerHeight = $0; resize() }
+        .onPreferenceChange(ListHeightKey.self) { listHeight = $0; resize() }
+        .onChange(of: store.sessions.isEmpty) { _, _ in resize() }
+        .onAppear { resize() }
+    }
+
+    private func resize() {
+        let list = store.sessions.isEmpty ? Layout.emptyListHeight : listHeight
+        let height = min(Layout.maxPanelHeight, max(120, (headerHeight + list).rounded(.up)))
+        if abs(height - store.panelHeight) > 0.5 {
+            DispatchQueue.main.async { store.panelHeight = height }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Circle().fill(store.needsYouCount > 0 ? Color.orange : Color.green).frame(width: 7, height: 7)
+            Text("Agent Huddle").font(.system(size: 13, weight: .semibold))
+            Text("\(store.sessions.count)").font(.system(size: 13, weight: .medium).monospacedDigit()).foregroundStyle(.secondary)
+            ForEach([Activity.needsYou, .working, .idle], id: \.self) { activity in
+                let count = store.sessions.filter { store.activity($0) == activity }.count
+                if count > 0 { CountChip(count: count, activity: activity) }
+            }
+            Spacer()
+            HeaderButton(symbol: store.muted ? "speaker.slash" : "speaker.wave.2",
+                         help: store.muted ? "Sounds are off. Click to turn them on" : "Sounds are on. Click to turn them off") {
+                store.muted.toggle()
+            }
+            HeaderButton(symbol: "chevron.up", help: "Shrink to a pill") { store.expanded = false }
+            HeaderButton(symbol: "xmark", help: "Hide the widget. Bring it back from the menu bar icon") { store.onClose?() }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+    }
+}
+
+struct HeaderButton: View {
+    var symbol: String
+    var help: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .medium)).frame(width: 22, height: 22).contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(help)
     }
 }
 
@@ -182,6 +244,7 @@ struct LimitsView: View {
 struct Meter: View {
     var fraction: Double
     var height: CGFloat = 4
+    var tint: Color? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -194,41 +257,27 @@ struct Meter: View {
     }
 
     private var color: Color {
+        if let tint { return tint }
         if fraction >= 0.9 { return .red }
         if fraction >= 0.75 { return .orange }
         return .accentColor
     }
 }
 
-// MARK: List
-
-struct SessionList: View {
-    @ObservedObject var store: HuddleStore
-
+struct EmptyList: View {
     var body: some View {
-        if store.sessions.isEmpty {
-            VStack(spacing: 8) {
-                Spacer()
-                BuddyView(traits: BuddyTraits(seed: "nobody home"), activity: .idle, size: 72)
-                Text("No Claude Code sessions are running").font(.system(size: 12, weight: .medium))
-                Text("Start one and its buddy shows up here.").font(.system(size: 11)).foregroundStyle(.secondary)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-        } else {
-            ScrollView {
-                VStack(spacing: 6) {
-                    ForEach(store.ordered) { session in
-                        SessionRow(store: store, session: session)
-                    }
-                }
-                .padding(10)
-                .animation(.easeOut(duration: 0.2), value: store.ordered.map(\.id))
-            }
+        VStack(spacing: 6) {
+            BuddyView(traits: BuddyTraits(seed: "nobody home"), activity: .idle, size: 64)
+            Text("No Claude Code sessions are running").font(.system(size: 12, weight: .medium))
+            Text("Start one and its buddy shows up here.").font(.system(size: 11)).foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
+// MARK: Rows
+
+/// One session. Click it to open it in place: its request, if it has one, and its latest steps.
 struct SessionRow: View {
     @ObservedObject var store: HuddleStore
     var session: AgentSession
@@ -236,88 +285,118 @@ struct SessionRow: View {
 
     var body: some View {
         let activity = store.activity(session)
-        let request = store.requests(for: session.id).first
+        let requests = store.requests(for: session.id)
+        let request = requests.first
+        let open = store.selected == session.id
         VStack(alignment: .leading, spacing: 8) {
-          HStack(alignment: .center, spacing: 4) {
-            Button {
-                store.selected = session.id
-            } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    BuddyView(traits: session.buddy, activity: activity, size: 40)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(session.displayName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text(activity.short)
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(activity.color)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(activity.color.opacity(0.15)))
-                        }
-                        Text(request.map(needText) ?? session.currentStep)
-                            .font(.system(size: 11))
-                            .foregroundStyle(request == nil ? Color.secondary : Color.orange)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        if let request, !request.isQuestion, !request.isPlan, !request.summary.isEmpty {
-                            // The exact command or path, never a description of it.
-                            Text(request.summary)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .lineLimit(QuickActions.maxLines)
-                                .multilineTextAlignment(.leading)
-                                .padding(6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
-                        }
-                        HStack(spacing: 6) {
-                            if let percent = session.status?.contextPercent {
-                                Meter(fraction: percent / 100, height: 3).frame(width: 44)
-                            }
-                            UsageLine(session: session)
-                            Spacer(minLength: 4)
-                            Text(session.info.project).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
-                        }
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if session.info.pid > 0 {
+            HStack(alignment: .top, spacing: 4) {
                 Button {
-                    store.jump(to: session)
+                    store.toggleSelection(session.id)
                 } label: {
-                    Image(systemName: "arrow.up.forward.app")
-                        .font(.system(size: 14))
-                        .frame(width: 26, height: 34)
-                        .contentShape(Rectangle())
+                    HStack(alignment: .top, spacing: 10) {
+                        BuddyView(traits: session.buddy, activity: activity, size: 40)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(session.displayName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                            statusLine(request)
+                            progressLine
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
-                .help("Go to the window where this session is running")
-            }
-          }
+                .buttonStyle(.plain)
 
-            if let request {
+                VStack(spacing: 0) {
+                    RowButton(symbol: "arrow.up.forward.app", help: "Go to the window where this session is running") {
+                        store.jump(to: session)
+                    }
+                    .disabled(session.info.pid <= 0)
+                    RowButton(symbol: "xmark", help: "Cross this session off the list until it does something new") {
+                        store.dismiss(session)
+                    }
+                    .disabled(request != nil)
+                }
+            }
+
+            if let request, !open {
                 QuickActions(store: store, request: request, session: session)
+            }
+            if open {
+                if let request {
+                    RequestCard(store: store, request: request, waiting: requests.count, session: session)
+                        .disabled(!store.armed)
+                }
+                SessionDetail(store: store, session: session)
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hovering ? 0.09 : 0.045)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(request == nil ? Color.clear : Color.orange.opacity(0.7)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hovering || open ? 0.08 : 0.045)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(request == nil ? Color.clear : Color.orange.opacity(0.8), lineWidth: 1.5))
         .onHover { hovering = $0 }
-        .help("\(session.buddy.name) is looking after this session")
+    }
+
+    @ViewBuilder
+    private func statusLine(_ request: PendingRequest?) -> some View {
+        if let request {
+            Text(needText(request)).font(.system(size: 11, weight: .semibold)).foregroundStyle(.orange).lineLimit(1)
+            if !request.isQuestion, !request.isPlan, !request.summary.isEmpty, store.selected != session.id {
+                // The exact command or path, never a description of it.
+                Text(request.summary)
+                    .font(.system(size: 10, design: .monospaced))
+                    .lineLimit(QuickActions.maxLines)
+                    .multilineTextAlignment(.leading)
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+            }
+        } else if let said = store.feedback[session.id] {
+            Label(said, systemImage: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(.green).lineLimit(1)
+        } else {
+            Text(session.currentStep).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+
+    /// Progress through the session's task list when it has one; otherwise how full its context is.
+    private var progressLine: some View {
+        HStack(spacing: 6) {
+            if let tasks = session.tasks {
+                Text("\(tasks.done)/\(tasks.total)").font(.system(size: 10, weight: .bold).monospacedDigit()).foregroundStyle(.green)
+                Text(tasks.current).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 4)
+                Meter(fraction: tasks.total == 0 ? 0 : Double(tasks.done) / Double(tasks.total), height: 3, tint: .green)
+                    .frame(width: 70)
+            } else {
+                if let percent = session.status?.contextPercent {
+                    Meter(fraction: percent / 100, height: 3).frame(width: 44)
+                }
+                UsageLine(session: session)
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     private func needText(_ request: PendingRequest) -> String {
-        if request.isQuestion { return "Has a question for you" }
-        if request.isPlan { return "Has a plan for you to approve" }
-        let what = Format.oneLine(request.note, limit: 90)
-        return "Wants to use \(Format.toolName(request.toolName))" + (what.isEmpty ? "" : ": \(what)")
+        if request.isQuestion { return "asks a question" }
+        if request.isPlan { return "has a plan to approve" }
+        return "needs permission: \(Format.toolName(request.toolName))"
     }
 }
 
-/// Lets the person answer a permission request straight from the list.
+struct RowButton: View {
+    var symbol: String
+    var help: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12)).frame(width: 24, height: 22).contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+    }
+}
+
+/// Lets the person answer a permission request straight from the closed row.
 struct QuickActions: View {
     @ObservedObject var store: HuddleStore
     var request: PendingRequest
@@ -343,7 +422,7 @@ struct QuickActions: View {
                 Button(request.isQuestion ? "Answer" : "Review plan") { store.selected = session.id }
                     .buttonStyle(.borderedProminent)
             } else if Self.fitsOnRow(request) {
-                Button("Details") { store.selected = session.id }
+                Button("More choices") { store.selected = session.id }
                 Button("Deny") { store.deny(request) }
                 Button("Allow") { store.allow(request) }
                     .buttonStyle(.borderedProminent)
@@ -378,76 +457,38 @@ struct UsageLine: View {
     }
 }
 
-// MARK: Detail
+// MARK: Open row
 
-struct DetailView: View {
+/// What an open row shows under its request: token use and the latest steps.
+struct SessionDetail: View {
     @ObservedObject var store: HuddleStore
     var session: AgentSession
 
     var body: some View {
-        let activity = store.activity(session)
-        let requests = store.requests(for: session.id)
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Button {
-                    store.selected = nil
-                } label: {
-                    Image(systemName: "chevron.left").frame(width: 20, height: 28).contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("All agents")
-                BuddyView(traits: session.buddy, activity: activity, size: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session.displayName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Text("\(session.buddy.name) · \(activity.label)")
-                        .font(.system(size: 10)).foregroundStyle(activity == .needsYou ? Color.orange : Color.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button {
-                    store.jump(to: session)
-                } label: {
-                    Label("Go to session", systemImage: "arrow.up.forward.app")
-                }
-                .disabled(session.info.pid <= 0)
-                .help("Go to the window where this session is running")
-                Button {
-                    store.dismiss(session)
-                } label: {
-                    Image(systemName: "eye.slash")
-                }
-                    .disabled(!requests.isEmpty)
-                    .help("Remove from the list until this session does something new")
-            }
-            .controlSize(.small)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let percent = session.status?.contextPercent {
-                    Meter(fraction: percent / 100, height: 3).frame(width: 60)
+                    Meter(fraction: percent / 100, height: 3).frame(width: 50)
                 }
                 UsageLine(session: session, long: true)
-                Spacer()
+                Spacer(minLength: 4)
                 if let evidence = session.evidence {
                     Button("Sources") { NSWorkspace.shared.open(evidence) }
                         .buttonStyle(.link)
                         .font(.system(size: 10))
                         .help("Open the log of every web search and page this session read")
                 }
-                Text(session.status?.model ?? session.usage.model)
-                    .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 8)
-            Divider()
-
-            if let request = requests.first {
-                RequestCard(store: store, request: request, waiting: requests.count)
-                    .disabled(!store.armed)
-                Divider()
+            HStack(spacing: 6) {
+                Text(session.buddy.name).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                Text("·").foregroundStyle(.tertiary)
+                Text(session.info.project).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                Spacer(minLength: 4)
+                Text(session.status?.model ?? session.usage.model).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
             }
             Timeline(steps: session.steps, now: store.now)
+                .frame(height: session.steps.isEmpty ? 24 : min(CGFloat(session.steps.count) * 34 + 8, 190))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.18)))
         }
     }
 }
@@ -467,7 +508,7 @@ struct Timeline: View {
                         StepRow(step: step, now: now).id(step.id)
                     }
                 }
-                .padding(14)
+                .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onAppear { proxy.scrollTo(steps.last?.id, anchor: .bottom) }
@@ -493,20 +534,20 @@ struct StepRow: View {
             }
             .frame(width: 14, height: 14)
             .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(step.title)
-                    .font(.system(size: 11, weight: step.kind == .text ? .regular : .medium))
-                    .foregroundStyle(step.kind == .text ? Color.secondary : Color.primary)
-                    .lineLimit(step.kind == .tool ? 1 : 4)
-                if !step.detail.isEmpty {
-                    Text(step.detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+            Group {
+                if step.kind == .tool {
+                    Text(step.title).font(.system(size: 11, weight: .medium))
+                        + Text(step.detail.isEmpty ? "" : "  \(step.detail)").font(.system(size: 11)).foregroundColor(.secondary)
+                } else {
+                    Text(step.title)
+                        .font(.system(size: 11, weight: step.kind == .prompt ? .medium : .regular))
+                        .foregroundStyle(step.kind == .text ? Color.secondary : Color.primary)
                 }
             }
+            .lineLimit(step.kind == .tool ? 1 : 3)
             Spacer(minLength: 4)
             Text(Format.ago(step.time, now: now)).font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
         }
-        .padding(step.kind == .prompt ? 8 : 0)
-        .background(RoundedRectangle(cornerRadius: 8).fill(step.kind == .prompt ? Color.accentColor.opacity(0.12) : Color.clear))
     }
 
     private var symbol: String {

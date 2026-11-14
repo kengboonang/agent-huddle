@@ -4,7 +4,7 @@
 
 Agent Huddle is a small macOS widget that keeps every Claude Code session you have running in one corner of your screen. See what each agent is doing, answer its permission requests and questions without switching windows, and watch how much of your usage limits is left. Each session gets its own little buddy that shows its mood: working, waiting, or in need of you.
 
-<img src="./docs/demo.gif" width="450" alt="Agent Huddle: the pill opens into a list of sessions, a permission request is allowed from the list, and a question is answered in the detail view" />
+<img src="./docs/demo.gif" width="450" alt="Agent Huddle: the pill opens into a list of sessions, a permission request is allowed from the list, and a question is answered inside the session's row" />
 
 *The demo uses sample data. Record it again with `HUDDLE_RECORD=docs/demo.gif .build/debug/AgentHuddle`.*
 
@@ -20,7 +20,7 @@ You need macOS 14 or later, the Swift toolchain (`xcode-select --install`) and C
     ./install.sh
     ```
 
-2. Look in the bottom-right corner of your screen for the pill, and click it.
+2. Look in the top-right corner of your screen for the pill, and click it.
 
 3. Start a new Claude Code session. Sessions that were already open need a restart to use the new hooks.
 
@@ -30,15 +30,18 @@ To remove everything except your handoff documents and evidence logs, run `./uni
 
 | All sessions | A request | A question |
 |---|---|---|
-| ![The list of sessions with their buddies and usage limits](docs/list.png) | ![A permission request with numbered choices](docs/permission.png) | ![A question from Claude with options to pick](docs/question.png) |
+| ![The list of sessions with their buddies and usage limits](docs/list.png) | ![A permission request with numbered choices](docs/permission.png) | ![A question from Claude, answered inside the session's row](docs/question.png) |
 
 - **A buddy for each session.** Every session gets its own small character, always the same one for
   that session. It bobs while the session works, hops with a "!" when the session needs you, and
   sleeps when the session is idle.
-- **All sessions in one list.** Each row shows the session name, its folder, what it is doing now,
-  how full its context window is, the output tokens so far and the cost.
+- **All sessions in one list.** Each row shows the session name and what it is doing now. A session
+  that keeps a task list shows how far along it is ("4/6 Fixing the checkout tests"); the others show
+  how full their context window is, the output tokens so far and the cost.
 - **Usage limits.** Your 5-hour and weekly limits, with the percent used and when each one resets.
-- **Step by step.** Click a session to see its prompts, tool calls (running, done or failed) and replies.
+- **Step by step, in place.** Click a session and its row opens where it is, showing its request (if
+  it has one), its token use and its latest prompts, tool calls (running, done or failed) and replies.
+  Click again to close it. The panel grows and shrinks with its content.
 - **Decide permissions with a click.** The request card works like Claude Code's own prompt:
   "Yes", "Yes, and don't ask again", "No", or "No, and tell Claude what to do differently".
   Plans are approved the same way.
@@ -47,14 +50,17 @@ To remove everything except your handoff documents and evidence logs, run `./uni
   path. Allow and Deny are on the row when the whole request fits there; a longer one opens in detail.
   The buttons switch off for a moment whenever the request on screen changes, so a click cannot land
   on a request you have not read.
-- **Go to the session.** The arrow on every row brings the window where that session runs to the
-  front. In Terminal and iTerm it selects the tab; in VS Code, Cursor and Windsurf it brings up the
+- **Go to the session, or cross it off.** The arrow on every row brings the window where that
+  session runs to the front. The cross under it removes the session from the list until it does
+  something new. In Terminal and iTerm it selects the tab; in VS Code, Cursor and Windsurf it brings up the
   window that has the session's folder open.
 - **It tells you when you are needed.** The widget opens on the session and plays a sound. It plays a
-  different sound when a session finishes working.
+  different sound when a session finishes working. The speaker button in the header turns sounds off.
+  After you answer, the row confirms it ("Allowed", or the option you picked).
 
-The widget sits in the bottom-right corner as a small pill. Click the pill to open it. Drag the open
-panel by its background to move it. The menu bar icon shows or hides the widget and quits it.
+The widget sits in the top-right corner as a small pill. Click the pill to open it. Drag the open
+panel by its background to move it; it remembers where you put it. The menu bar icon shows or hides
+the widget, moves it back to the corner, and quits it.
 
 ## What the installer changes
 

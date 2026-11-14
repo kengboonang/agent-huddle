@@ -7,6 +7,15 @@ public final class TranscriptReader {
     public private(set) var steps: [Step] = []
     public private(set) var title: String?
     public private(set) var usage = Usage()
+    /// Progress through the session's task list, when it keeps one.
+    public var tasks: TaskProgress? {
+        guard !taskList.isEmpty else { return nil }
+        let done = taskList.filter { $0.status == "completed" }.count
+        let active = taskList.first { $0.status == "in_progress" }
+        let current = active.map { $0.active.isEmpty ? $0.title : $0.active }
+            ?? taskList.first { $0.status != "completed" }?.title ?? "All done"
+        return TaskProgress(done: done, total: taskList.count, current: current)
+    }
 
     /// On first read of a big transcript, only this many bytes from the end are read.
     public var maxInitialBytes: UInt64 = 3_000_000
@@ -15,6 +24,8 @@ public final class TranscriptReader {
     private var offset: UInt64 = 0
     private var started = false
     private var outputByMessage: [String: Int] = [:]
+    private var taskList: [(id: String, title: String, active: String, status: String)] = []
+    private var nextTaskId = 1
     private let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -98,6 +109,36 @@ public final class TranscriptReader {
         title = nil
         usage = Usage()
         outputByMessage = [:]
+        taskList = []
+        nextTaskId = 1
+    }
+
+    /// Follows the two ways Claude Code keeps a task list: TodoWrite (the whole list each time)
+    /// and TaskCreate / TaskUpdate (one task at a time, numbered from 1).
+    private func readTasks(_ name: String, _ input: [String: Any]) {
+        switch name {
+        case "TodoWrite":
+            guard let todos = input["todos"] as? [[String: Any]] else { return }
+            taskList = todos.enumerated().map { index, todo in
+                (id: "\(index + 1)", title: todo["content"] as? String ?? "", active: todo["activeForm"] as? String ?? "",
+                 status: todo["status"] as? String ?? "pending")
+            }
+        case "TaskCreate":
+            taskList.append((id: "\(nextTaskId)", title: input["subject"] as? String ?? "",
+                             active: input["activeForm"] as? String ?? "", status: "pending"))
+            nextTaskId += 1
+        case "TaskUpdate":
+            let id = (input["taskId"] as? String) ?? (input["taskId"] as? NSNumber)?.stringValue ?? ""
+            guard let at = taskList.firstIndex(where: { $0.id == id }) else { return }
+            if let status = input["status"] as? String {
+                if status == "deleted" { taskList.remove(at: at); return }
+                taskList[at].status = status
+            }
+            if let subject = input["subject"] as? String { taskList[at].title = subject }
+            if let active = input["activeForm"] as? String { taskList[at].active = active }
+        default:
+            break
+        }
     }
 
     private func parse(_ line: Data) {
@@ -125,6 +166,7 @@ public final class TranscriptReader {
                 case "tool_use":
                     let name = block["name"] as? String ?? "Tool"
                     let input = block["input"] as? [String: Any] ?? [:]
+                    readTasks(name, input)
                     steps.append(Step(id: block["id"] as? String ?? "\(uuid)-\(index)", kind: .tool, state: .running,
                                       title: Format.toolName(name), detail: Self.label(name, input), time: time))
                 default:

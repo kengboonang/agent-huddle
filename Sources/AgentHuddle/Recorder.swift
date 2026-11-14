@@ -22,14 +22,16 @@ extension EnvironmentValues {
 final class DemoDirector: ObservableObject {
     @Published var clock: Double = 0
     @Published var caption = ""
-    @Published var cursor = CGPoint(x: 330, y: 560)
+    @Published var cursor = CGPoint(x: 250, y: 420)
     @Published var ripple: Double? = nil
 }
 
 /// The widget in the corner of a plain backdrop, with a caption and a pointer.
 struct DemoStage: View {
-    static let size = CGSize(width: 450, height: 700)
+    static let size = CGSize(width: 450, height: 760)
     static let margin: CGFloat = 24
+    /// The widget hangs from this line, like a widget in the top-right corner of a screen.
+    static let top: CGFloat = 96
 
     @ObservedObject var store: HuddleStore
     @ObservedObject var director: DemoDirector
@@ -47,8 +49,9 @@ struct DemoStage: View {
                 .padding(.top, 26)
             RootView(store: store)
                 .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
-                .padding(Self.margin)
-                .frame(width: Self.size.width, height: Self.size.height, alignment: .bottomTrailing)
+                .padding(.trailing, Self.margin)
+                .padding(.top, Self.top)
+                .frame(width: Self.size.width, height: Self.size.height, alignment: .topTrailing)
             if let ripple = director.ripple {
                 Circle()
                     .strokeBorder(Color.white.opacity(1 - ripple), lineWidth: 2)
@@ -70,10 +73,9 @@ struct DemoStage: View {
 enum Recorder {
     static let fps = 10.0
     /// Top-left corner of the open panel and of the pill, in stage points.
-    static let panel = CGPoint(x: DemoStage.size.width - DemoStage.margin - Layout.panel.width,
-                               y: DemoStage.size.height - DemoStage.margin - Layout.panel.height)
+    static let panel = CGPoint(x: DemoStage.size.width - DemoStage.margin - Layout.panelWidth, y: DemoStage.top)
     static let pill = CGPoint(x: DemoStage.size.width - DemoStage.margin - Layout.pill.width / 2,
-                              y: DemoStage.size.height - DemoStage.margin - Layout.pill.height / 2)
+                              y: DemoStage.top + Layout.pill.height / 2)
 
     static func inPanel(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
         CGPoint(x: panel.x + x, y: panel.y + y)
@@ -94,7 +96,7 @@ enum Recorder {
         return [
             Beat(caption: "Every Claude Code session, in one corner", hold: 1.8),
             Beat(moveTo: pill, click: true, action: { $0.expanded = true }, hold: 0.3),
-            Beat(caption: "What each agent is doing, and how much of your limits is left", hold: 2.6),
+            Beat(caption: "What each agent is doing, how far along it is, and what is left of your limits", hold: 2.8),
             Beat(caption: "An agent needs you: it jumps to the top", action: { store in
                 store.pending = [Demo.permissionRequest()]
             }, hold: 2.0),
@@ -102,18 +104,18 @@ enum Recorder {
                  moveTo: inPanel(345, 241), travel: 0.9, click: true, action: { store in
                      if let request = store.pending.first { store.allow(request) }
                  }, hold: 1.6),
-            Beat(caption: "Open a session to follow every step", moveTo: inPanel(215, 150), click: true,
+            Beat(caption: "Click a session to open it in place and follow every step", moveTo: inPanel(200, 142), click: true,
                  action: { $0.selected = "a" }, hold: 2.4),
             Beat(caption: "Claude has a question: answer it without switching windows", action: { store in
                 store.pending = [Demo.questionRequest()]
             }, hold: 1.8),
-            Beat(moveTo: inPanel(150, 273), click: true, action: { store in
+            Beat(moveTo: inPanel(150, 262), click: true, action: { store in
                 store.picks["q1|\(question)"] = ["Fixed footer"]
             }, hold: 0.7),
-            Beat(moveTo: inPanel(332, 384), click: true, action: { store in
+            Beat(moveTo: inPanel(316, 374), click: true, action: { store in
                 if let request = store.pending.first { store.sendAnswers(request) }
             }, hold: 1.8),
-            Beat(caption: "Then get back to work", moveTo: inPanel(364, 23), click: true, action: { store in
+            Beat(caption: "Then get back to work", moveTo: inPanel(337, 23), click: true, action: { store in
                 store.selected = nil
                 store.expanded = false
             }, hold: 2.2),

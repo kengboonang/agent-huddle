@@ -80,6 +80,20 @@ public struct Usage: Equatable {
     public init() {}
 }
 
+/// How far a session is through its own task list.
+public struct TaskProgress: Equatable {
+    public var done: Int
+    public var total: Int
+    /// The task being worked on now, or the next one.
+    public var current: String
+
+    public init(done: Int, total: Int, current: String) {
+        self.done = done
+        self.total = total
+        self.current = current
+    }
+}
+
 /// One rate-limit window (5-hour, weekly or spend limit).
 public struct LimitWindow: Identifiable, Equatable {
     public var id: String { key }

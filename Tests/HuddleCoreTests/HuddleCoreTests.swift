@@ -111,6 +111,39 @@ private func assistant(id: String, blocks: [[String: Any]], input: Int = 10, cac
         #expect(reader.usage.contextTokens == 10 + 99)
     }
 
+    @Test func followsATodoList() throws {
+        let path = try tempFile([assistant(id: "m1", blocks: [["type": "tool_use", "id": "t1", "name": "TodoWrite", "input": ["todos": [
+            ["content": "Write the parser", "activeForm": "Writing the parser", "status": "completed"],
+            ["content": "Add tests", "activeForm": "Adding tests", "status": "in_progress"],
+            ["content": "Update the docs", "activeForm": "Updating the docs", "status": "pending"],
+        ]]]])])
+        let reader = TranscriptReader(path: path)
+        #expect(reader.tasks == nil)
+        reader.refresh()
+        #expect(reader.tasks == TaskProgress(done: 1, total: 3, current: "Adding tests"))
+    }
+
+    @Test func followsTasksCreatedOneAtATime() throws {
+        func call(_ id: String, _ name: String, _ input: [String: Any]) -> [String: Any] {
+            assistant(id: id, blocks: [["type": "tool_use", "id": "tool-\(id)", "name": name, "input": input]])
+        }
+        let path = try tempFile([
+            call("a", "TaskCreate", ["subject": "Draft the script", "activeForm": "Drafting the script"]),
+            call("b", "TaskCreate", ["subject": "Render the video"]),
+            call("c", "TaskUpdate", ["taskId": "1", "status": "in_progress"]),
+        ])
+        let reader = TranscriptReader(path: path)
+        reader.refresh()
+        #expect(reader.tasks == TaskProgress(done: 0, total: 2, current: "Drafting the script"))
+        try append(path, call("d", "TaskUpdate", ["taskId": "1", "status": "completed"]))
+        reader.refresh()
+        #expect(reader.tasks == TaskProgress(done: 1, total: 2, current: "Render the video"))
+        try append(path, call("e", "TaskUpdate", ["taskId": "2", "status": "completed"]))
+        try append(path, call("f", "TaskUpdate", ["taskId": "9", "status": "completed"]))
+        reader.refresh()
+        #expect(reader.tasks == TaskProgress(done: 2, total: 2, current: "All done"))
+    }
+
     @Test func missingFileIsNotAnError() {
         #expect(TranscriptReader(path: "/nonexistent/file.jsonl").refresh() == false)
     }

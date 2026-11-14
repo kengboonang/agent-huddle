@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem?
     private var cancellables: Set<AnyCancellable> = []
     private var resizing = false
-    private let cornerKey = "panelCorner"
+    private let cornerKey = "panelTopRight"
 
     override init() {
         let env = ProcessInfo.processInfo.environment
@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         item.button?.image = NSImage(systemSymbolName: "person.2.wave.2", accessibilityDescription: "Agent Huddle")
         let menu = NSMenu()
         menu.addItem(withTitle: "Show or hide widget", action: #selector(toggleVisible), keyEquivalent: "")
-        menu.addItem(withTitle: "Move widget back to the corner", action: #selector(resetCorner), keyEquivalent: "")
+        menu.addItem(withTitle: "Move widget back to the top-right corner", action: #selector(resetCorner), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Agent Huddle", action: #selector(quit), keyEquivalent: "q")
         for entry in menu.items { entry.target = self }
@@ -64,6 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.$expanded.removeDuplicates().sink { [weak self] expanded in
             DispatchQueue.main.async { self?.fit(expanded: expanded) }
         }.store(in: &cancellables)
+        store.$panelHeight.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { if let self { self.fit(expanded: self.store.expanded) } }
+        }.store(in: &cancellables)
+        store.onClose = { [weak self] in self?.panel.orderOut(nil) }
         store.$pending.map(\.count).removeDuplicates().sink { [weak self] count in
             self?.statusItem?.button?.title = count > 0 ? " \(count)" : ""
         }.store(in: &cancellables)
@@ -73,23 +77,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Position
 
-    /// The bottom-right corner stays where it is while the panel grows and shrinks.
+    /// The top-right corner stays where it is while the panel grows and shrinks.
     private func corner() -> NSPoint {
         if let saved = UserDefaults.standard.string(forKey: cornerKey) {
             let point = NSPointFromString(saved)
             if NSScreen.screens.contains(where: { $0.frame.insetBy(dx: -1, dy: -1).contains(point) }) { return point }
         }
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return NSPoint(x: 400, y: 100) }
-        return NSPoint(x: screen.visibleFrame.maxX - 16, y: screen.visibleFrame.minY + 16)
+        return NSPoint(x: screen.visibleFrame.maxX - 16, y: screen.visibleFrame.maxY - 16)
     }
 
     private func fit(expanded: Bool) {
-        let size = expanded ? Layout.panel : Layout.pill
+        let size = expanded ? CGSize(width: Layout.panelWidth, height: store.panelHeight) : Layout.pill
         let anchor = corner()
-        var frame = NSRect(x: anchor.x - size.width, y: anchor.y, width: size.width, height: size.height)
+        var frame = NSRect(x: anchor.x - size.width, y: anchor.y - size.height, width: size.width, height: size.height)
         if let screen = NSScreen.screens.first(where: { $0.frame.insetBy(dx: -1, dy: -1).contains(anchor) }) {
             let visible = screen.visibleFrame
-            frame.origin.y = min(frame.origin.y, visible.maxY - size.height)
+            frame.origin.y = max(frame.origin.y, visible.minY)
             frame.origin.x = max(frame.origin.x, visible.minX)
         }
         resizing = true
@@ -100,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard !resizing else { return }
         let frame = panel.frame
-        UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: frame.maxX, y: frame.minY)), forKey: cornerKey)
+        UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: frame.maxX, y: frame.maxY)), forKey: cornerKey)
     }
 
     // MARK: Menu
@@ -136,13 +140,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             store.expanded = true
             if let select = ProcessInfo.processInfo.environment["HUDDLE_SELECT"] { store.selected = select }
         }
-        let size = store.expanded ? Layout.panel : Layout.pill
-        let host = NSHostingView(rootView: RootView(store: store).frame(width: size.width, height: size.height))
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
-                              backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: RootView(store: store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Layout.panelWidth, height: Layout.maxPanelHeight),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
+        // The panel sizes itself to its content, so let it settle before measuring.
+        for _ in 0..<3 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+            let size = store.expanded ? CGSize(width: Layout.panelWidth, height: store.panelHeight) : Layout.pill
+            window.setContentSize(size)
+            host.frame = NSRect(origin: .zero, size: size)
+        }
         host.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
         host.cacheDisplay(in: host.bounds, to: bitmap)
         try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
